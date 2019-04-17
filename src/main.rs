@@ -13,12 +13,12 @@ use std::{
     env::{args, Args},
     result::Result,
     string::String,
-    sync::{Arc,Mutex},
-    time::{Duration,Instant}
+    sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant}
 };
 
 use geom::Scene;
-use sys::{io, renderer};
+use sys::{io, renderer::{Color, RenderStage, RenderReq}};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
 
@@ -64,17 +64,10 @@ impl Config {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Action { Continue, Exit, }
 
-fn render<'r>(r: &'r mut renderer::Renderer, sc_op: &Option<Scene>) -> Result<(), &'r str> {
-    match sc_op {
-        Some(sc) => unimplemented!(),
-        None => r.draw_empty_scene(),
-    }
-}
-
 struct State {
-    sc: Option<Scene>,
+    sc: Arc<RwLock<Option<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
-    r: sys::renderer::Renderer,
+    rs: Option<RenderStage>,
     sys: Option<io::Manager>, // TODO check mutability constraints
     c: Config,
     // shutdown flow
@@ -87,7 +80,8 @@ struct State {
 impl State {
     fn new(cfg: Config) -> State {
         let mut sm = io::Manager::new();
-        let renderer = renderer::Renderer::new(&sm.win).expect("Could not create renderer.");
+        let sc = Arc::new(RwLock::new(std::option::Option::None));
+        let renderer = Option::Some(RenderStage::new(sc.clone(), sm.win.clone()));
         // set up shutdown flow
         let c_act = Arc::new(Mutex::new(Action::Continue));
         let internal_c_act = c_act.clone();
@@ -103,10 +97,10 @@ impl State {
             }
         }));
         sm.reg_per(io::e::p::C::MousePos.into(), cb_color.clone());
-        log::info!("Finished initial setup.");
+        info!("Finished initial setup.");
         State {
-            sc: std::option::Option::None,
-            r: renderer,
+            sc: sc,
+            rs: renderer,
             sys: Option::Some(sm),
             c: cfg,
             // shutdown flow
@@ -125,14 +119,14 @@ impl State {
         // TODO render
         // render(&mut self.r, &self.sc).expect("Nothing should be wrong yet...");
         let original_color = self.color.lock().expect("Seriously?");
-        info!("Colors!");
-        let downgraded_color = na::Vector4::new(
-            original_color[0] as f32,
-            original_color[1] as f32,
-            original_color[2] as f32,
-            original_color[3] as f32,
-        );
-        self.r.clear_color(downgraded_color).expect("Render failed.");
+        if let Some(ref rs) = self.rs {
+            rs.send_cmd(RenderReq::Clear(Color(na::Vector4::new(
+                original_color[0] as f32,
+                original_color[1] as f32,
+                original_color[2] as f32,
+                original_color[3] as f32,
+            )))).expect("No problems expected.");
+        }
         // Every <variable> invocations
         // TODO run cold logic
         // possibly do above 2 steps in lock step
@@ -142,8 +136,13 @@ impl State {
     fn cleanup(mut self) -> Result<(), String> {
         let mut res = Result::Err(String::from("Could not clean up State."));
         // TODO change to let chaining once available
+        info!("Shutting down system management.");
         if let Option::Some(sys) = self.sys.take() {
             res = std::result::Result::Ok(sys.finish().expect("Could not complete `Manager` finish."))
+        }
+        info!("Shutting down rendering systems.");
+        if let Some(rs) = self.rs.take() {
+            res = std::result::Result::Ok(rs.finish().expect("Could not complete `Manager` finish."))
         }
         res
     }

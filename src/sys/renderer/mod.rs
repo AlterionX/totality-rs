@@ -34,15 +34,22 @@ use self::hal::{
 };
 use av::ArrayVec;
 use std::{
+    ops::DerefMut,
+    cell::{RefCell, Cell},
     time::SystemTime,
     result::Result,
-    sync::{Arc,Mutex},
+    sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, TryRecvError, RecvError, SendError}},
     mem::ManuallyDrop,
     ptr::read,
+    thread::spawn,
 };
-use na::{Vector3,Vector4};
+use na::{Vector3, Vector4};
 use winit::Window;
-use log::{info};
+use super::threading::KillableThread;
+use super::super::geom;
+
+#[allow(dead_code)]
+use log::{info, error};
 
 pub struct Renderer {
     current_frame: usize,
@@ -64,8 +71,17 @@ pub struct Renderer {
     _instance: ManuallyDrop<back::Instance>,
 }
 
+pub trait RenderFn: FnMut(&mut Renderer) + Send + 'static {}
+impl <F> RenderFn for F where F: FnMut(&mut Renderer) + Send + 'static {}
+pub struct Color(pub na::Vector4<f32>);
+pub enum RenderReq {
+    Clear(Color),
+    Seq(Vec<RenderReq>),
+    Free(Arc<Mutex<RenderFn>>),
+}
+
 impl Renderer {
-    pub fn new(w: &Window) -> Result<Self, &str> {
+    fn new(w: &Window) -> Result<Self, &'static str> {
         let inst = back::Instance::create("Tracer", 1);
         let mut surf = inst.create_surface(w);
         let adapter = hal::Instance::enumerate_adapters(&inst)
@@ -260,7 +276,7 @@ impl Renderer {
             _instance: ManuallyDrop::new(inst),
         })
     }
-    pub fn draw_empty_scene(&mut self) -> Result<(), &str> {
+    fn draw_empty_scene(&mut self) -> Result<(), &'static str> {
         let since_epoch = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(n) => (((n.as_nanos() % 1_000_000_000u128) as f64) / 1_000_000_000f64) as f32,
             Err(_) => 1f32
@@ -268,7 +284,7 @@ impl Renderer {
         let col = Vector4::repeat(since_epoch);
         self.clear_color(col)
     }
-    pub fn clear_color<C>(&mut self, color: C) -> Result<(), &str> where C: Into<[f32; 4]> {
+    fn clear_color<C>(&mut self, color: C) -> Result<(), &'static str> where C: Into<[f32; 4]> {
         let color = color.into();
         // TODO FRAME PREP
         let image_available = &self.image_available_semaphores[self.current_frame];
@@ -323,6 +339,21 @@ impl Renderer {
             .map_err(|_| "Failed to present into the swapchain!")
         }
     }
+    fn handle_req(r: &mut Renderer, q: RenderReq) -> Result<(), &'static str> {
+        match q {
+            RenderReq::Clear(Color(c)) => r.clear_color(c),
+            RenderReq::Free(a) => match a.lock() {
+                Ok(mut f) => Result::Ok(f.deref_mut()(r)),
+                Err(_) => Result::Err("I hate when I'm given poisoned cookies."),
+            },
+            RenderReq::Seq(qq) => {
+                for q in qq {
+                    Self::handle_req(r, q)?
+                }
+                Result::Ok(())
+            }
+        }
+    }
 }
 impl Drop for Renderer {
     fn drop(&mut self) {
@@ -359,3 +390,61 @@ impl Drop for Renderer {
     }
 }
 
+pub struct RenderStage {
+    req_tx: Sender<RenderReq>,
+    // update_rx: Receiver<geom::Frame>,
+    scene: Arc<RwLock<Option<geom::Scene>>>,
+    render_thread: Option<KillableThread>,
+}
+impl RenderStage {
+    fn start_render_thread(req_rx: Receiver<RenderReq>, w: Arc<Window>) -> KillableThread {
+        let (tx, rx) = channel();
+        KillableThread::new(tx, spawn(move || {
+            info!("Created rendering thread.");
+            let mut r = Renderer::new(&*w).expect("Fuck. Couldn't create a thingy-thing.");
+            loop {
+                match req_rx.try_recv() {
+                    // Cannot handle messages
+                    Ok(req) => match Renderer::handle_req(&mut r, req) {
+                        Ok(_) => (),
+                        Err(s) => error!("{:?}", s),
+                    },
+                    // If any error occurs, do nothing. Dropping is handled elsewhere
+                    Err(_) => (),
+                };
+                // try recv from rx + kill if dropped
+                match rx.try_recv() {
+                    // Cannot handle messages
+                    Ok(_) => panic!("Unexpected input"),
+                    // No input means continue
+                    Err(TryRecvError::Empty) => continue,
+                    // Outside was dropped, so stop this thread
+                    Err(TryRecvError::Disconnected) => break,
+                };
+            }
+            info!("Terminating rendering thread.");
+        }))
+    }
+    pub fn new(sc_arc: Arc<RwLock<Option<geom::Scene>>>, w: Arc<Window>) -> RenderStage {
+        let (req_tx, req_rx) = channel();
+        RenderStage {
+            req_tx: req_tx,
+            scene: sc_arc,
+            render_thread: Option::Some(Self::start_render_thread(req_rx, w)),
+        }
+    }
+    pub fn send_cmd(&self, q: RenderReq) -> Result<(), SendError<RenderReq>> { self.req_tx.send(q) }
+    pub fn finish(mut self) -> Result<(), String> {
+        if let Some(rt) = self.render_thread.take() {
+            rt.finish().expect("Hurry up and finish, please.")
+        }
+        std::result::Result::Ok(())
+    }
+}
+impl Drop for RenderStage {
+    fn drop(&mut self) {
+        if self.render_thread.is_some() {
+            panic!("Must call finish on RenderStage before dropping.");
+        }
+    }
+}
