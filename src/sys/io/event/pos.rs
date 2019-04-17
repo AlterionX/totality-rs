@@ -4,6 +4,28 @@ use na::Vector2;
 pub enum C {
     MousePos, MouseDelta, ScreenPos, CursorPos, ScreenSz,
 }
+impl From<V> for C {
+    fn from(v: V) -> C {
+        match v {
+            V::CursorPos(_) => C::CursorPos,
+            V::ScreenSz(_) => C::ScreenSz,
+            V::ScreenPos(_) => C::ScreenPos,
+            V::MousePos(_) => C::MousePos,
+            V::MouseDelta(_) => C::MouseDelta,
+        }
+    }
+}
+impl From<&V> for C {
+    fn from(v: &V) -> C {
+        match v {
+            V::CursorPos(_) => C::CursorPos,
+            V::ScreenSz(_) => C::ScreenSz,
+            V::ScreenPos(_) => C::ScreenPos,
+            V::MousePos(_) => C::MousePos,
+            V::MouseDelta(_) => C::MouseDelta,
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct PosState(pub Vector2<f32>);
@@ -28,17 +50,6 @@ impl V {
             ScreenPos => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
             ScreenSz => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
             CursorPos => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
-        }
-    }
-}
-impl From<V> for C {
-    fn from(v: V) -> C {
-        match v {
-            V::MousePos(_) => C::MousePos,
-            V::MouseDelta(_) => C::MouseDelta,
-            V::ScreenPos(_) => C::ScreenPos,
-            V::ScreenSz(_) => C::ScreenSz,
-            V::CursorPos(_) => C::CursorPos,
         }
     }
 }

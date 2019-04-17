@@ -8,7 +8,13 @@ impl C {
     fn default_value(&self) -> V { V::default_value_of(&self) }
 }
 impl From<V> for C {
-    fn from(v: V) -> C { v.0 }
+    fn from(v: V) -> C { v.0.clone() }
+}
+impl From<&V> for C {
+    fn from(v: &V) -> C { v.0.clone() }
+}
+impl <'a> From<&'a V> for &'a C {
+    fn from(v: &V) -> &C { &v.0 }
 }
 
 // TODO look into distinctions between left and right ctrl, shift, alt, etc

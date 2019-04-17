@@ -2,6 +2,20 @@
 pub enum C {
     Scroll,
 }
+impl From<&V> for C {
+    fn from(v: &V) -> C {
+        match v {
+            V::Scroll(_) => C::Scroll
+        }
+    }
+}
+impl From<V> for C {
+    fn from(v: V) -> C {
+        match v {
+            V::Scroll(_) => C::Scroll
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum V {
@@ -11,13 +25,6 @@ impl V {
     pub fn default_value_of(c: &C) -> Self {
         match c {
             Scroll => V::Scroll(0f32)
-        }
-    }
-}
-impl From<V> for C {
-    fn from(v: V) -> C {
-        match v {
-            V::Scroll(_) => C::Scroll
         }
     }
 }

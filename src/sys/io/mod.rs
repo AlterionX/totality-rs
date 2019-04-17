@@ -179,18 +179,18 @@ impl Manager {
             },
             pollers: Option::Some(Twinned {
                 imm: Self::start_event_thread(curr.clone(), win_tx, imm_rx, w_imm_tx),
-                per: Self::start_periodic_thread(curr.clone(), per_rx, w_per_tx),
+                per: Self::start_periodic_thread(curr, per_rx, w_per_tx),
             }),
             win: win_rx.recv().unwrap(),
         }
     }
     pub fn reg_imm<F>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> where F: cb::CBFn {
         let cb = Arc::downgrade(&f);
-        Self::send_to_manager(&self.registrar.imm, cb::RegRequest::Register(c, vec![cb::CB::new(c.clone(), cb)]))
+        Self::send_to_manager(&self.registrar.imm, cb::RegRequest::Register(c, vec![cb::CB::new(c, cb)]))
     }
     pub fn reg_per<F>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> where F: cb::CBFn {
         let cb = Arc::downgrade(&f);
-        Self::send_to_manager(&self.registrar.per, cb::RegRequest::Register(c, vec![cb::CB::new(c.clone(), cb)]))
+        Self::send_to_manager(&self.registrar.per, cb::RegRequest::Register(c, vec![cb::CB::new(c, cb)]))
     }
     pub fn unreg_imm(&self, cb: Weak<Mutex<cb::CB>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> {
         Self::send_to_manager(&self.registrar.imm, cb::RegRequest::Unregister(vec![cb]))

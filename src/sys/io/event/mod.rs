@@ -3,7 +3,6 @@ pub mod axis;
 pub mod pos;
 pub mod button;
 
-use self::change::*;
 pub use self::axis as a;
 pub use self::pos as p;
 pub use self::button as b;
@@ -31,6 +30,16 @@ impl C {
 }
 impl From<V> for C {
     fn from(v: V) -> C {
+        match v {
+            V::A(v) => C::from(a::C::from(v)),
+            V::P(v) => C::from(p::C::from(v)),
+            V::B(v) => C::from(b::C::from(v)),
+            _ => unimplemented!("Crap. Can't convert from {:?} to C yet.", v),
+        }
+    }
+}
+impl From<&V> for C {
+    fn from(v: &V) -> C {
         match v {
             V::A(v) => C::from(a::C::from(v)),
             V::P(v) => C::from(p::C::from(v)),
@@ -72,15 +81,15 @@ impl From<b::V> for V {
     fn from(v: b::V) -> V { V::B(v) }
 }
 impl State {
-    pub fn update<T>(&mut self, v: &V) -> (C, V) {
+    pub fn update<'a, T>(&mut self, v: &'a V) -> (C, &'a V) {
         match v {
-            V::Ignored => (C::Ignored, V::Ignored),
+            V::Ignored => (C::Ignored, &V::Ignored),
             _ => {
                 // update per event
                 // TODO use previously found v to update e
-                let c = C::from(v.clone());
+                let c = C::from(v);
                 self.m.insert(c, v.clone());
-                (c, v.clone())
+                (c, v)
             }
         }
     }
