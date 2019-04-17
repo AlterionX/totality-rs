@@ -1,0 +1,36 @@
+[package]
+name = "totality"
+version = "0.1.0"
+authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+gfx-hal = "0.1.0"
+winit = "0.18.1"
+nalgebra = "0.18"
+num_cpus = "1.0"
+image = "*"
+crossbeam = "0.5"
+log = "0.4.0"
+simple_logger = "1.0"
+arrayvec = "0.4.10"
+
+[dependencies.gfx-backend-vulkan]
+version = "0.1"
+optional = true
+
+[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
+version = "0.1"
+optional = true
+
+[target.'cfg(windows)'.dependencies.gfx-backend-dx12]
+version = "0.1"
+optional = true
+
+[features]
+default = ["vulkan"]
+metal = ["gfx-backend-metal"]
+dx12 = ["gfx-backend-dx12"]
+vulkan = ["gfx-backend-vulkan"]
+unstable = []
+
