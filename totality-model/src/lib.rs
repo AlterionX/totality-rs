@@ -1,5 +1,4 @@
 extern crate nalgebra as na;
-extern crate crossbeam as cb;
 
 use std::sync::Arc;
 use na::{
@@ -33,7 +32,7 @@ impl Camera {
     pub fn take_img(&self, s: &Scene) -> Img {
         println!("Hello");
         let mut img = Vec::new();
-        let (tx, rx) = cb::channel::unbounded();
+        let (tx, rx) = std::sync::mpsc::channel();
         let rrr = self.get_rays();
         for (row, rr) in rrr.iter().enumerate() {
             img.push(Vec::new());

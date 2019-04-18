@@ -5,7 +5,7 @@ mod source;
 pub use self::event as e;
 pub use self::source::WindowSpecs;
 use self::source::IO;
-use super::threading::KillableThread;
+use super::kt::KillableThread;
 
 use std::{
     option::Option,
@@ -14,7 +14,7 @@ use std::{
         mpsc::{channel, TryRecvError, Sender, Receiver, RecvError, SendError},
     },
     result::Result,
-    time::Instant,
+    time::{Instant, Duration},
 };
 use winit::Window;
 use self::e::*;
@@ -31,6 +31,15 @@ impl <T> Twinned<T> {
         f(self.imm);
         f(self.per);
     }
+    fn map<F, U>(self, f: F) -> Twinned<U> where F: Fn(T) -> U {
+        Twinned {
+            imm: f(self.imm),
+            per: f(self.per),
+        }
+    }
+    fn as_tup(self) -> (T, T) {
+        (self.imm, self.per)
+    }
 }
 
 pub enum RegErr<T> {
@@ -40,7 +49,7 @@ pub enum RegErr<T> {
 
 pub struct Manager {
     registrar: Twinned<Mutex<(Sender<cb::RegRequest>, Receiver<cb::RegResponse>)>>, // triggered periodically
-    pollers: Option<Twinned<KillableThread>>, // thread handle of polling thread
+    pollers: Option<Twinned<KillableThread<()>>>, // thread handle of polling thread
     pub win: Arc<self::source::back::Window>, // output is just this part
 }
 impl Manager {
@@ -51,9 +60,9 @@ impl Manager {
         win_tx: Sender<Window>,
         req_rx: Receiver<cb::RegRequest>,
         res_tx: Sender<cb::RegResponse>,
-    ) -> KillableThread {
+    ) -> KillableThread<()> {
         let (tx, rx) = channel();
-        KillableThread::new(tx, std::thread::spawn(move || {
+        KillableThread::new(tx, "Immediate Event Loop".to_string(), move || {
             println!("Starting system state immediate thread.");
             let mut man = cb::Manager::new();
             let mut io = self::source::back::IO::new();
@@ -61,9 +70,27 @@ impl Manager {
             if let Err(_) = win_tx.send(io.create_window(WindowSpecs::new("Tracer"))) {
                 panic!("Could not send created window back to main thread.");
             };
-            let mut last_time = Instant::now();
+            let target = Duration::from_secs(1).checked_div(600).expect("A constant is taken to be equal to 0...");
             loop {
-                let curr_time = Instant::now();
+                let curr_start_time = Instant::now();
+                trace!("Pulling callbacks.");
+                loop {
+                    match req_rx.try_recv() {
+                        // Cannot handle messages
+                        Ok(req) => match res_tx.send(man.handle_req(req)) {
+                            Ok(_) => trace!("Request completed fully."),
+                            Err(_) => warn!("Request completed, but response could not be sent."),
+                        },
+                        // If any error occurs, break. Dropping is handled elsewhere
+                        Err(TryRecvError::Empty) => break,
+                        // Outside was dropped, so stop this thread
+                        Err(TryRecvError::Disconnected) => {
+                            warn!("Request channel dropped prior to exit.");
+                            break
+                        },
+                    }
+                }
+                trace!("Firing all callbacks.");
                 match s_m.lock() {
                     Ok(mut s_mg) => {
                         let mut vv = Vec::with_capacity(10);
@@ -71,72 +98,82 @@ impl Manager {
                         // if vv.len() != 0 { man.fire_and_clean_listing(&mut *s_mg, &mut vv); }
                         man.fire_and_clean_listing(&mut *s_mg, &mut vv);
                     },
-                    Err(_) => (),
+                    Err(_) => error!("State is poisoned."),
                 };
-                loop {
-                    match req_rx.try_recv() {
-                        // Cannot handle messages
-                        Ok(req) => match res_tx.send(man.handle_req(req)) {
-                            Ok(_) => (), // everything is fine
-                            Err(_) => (), // Don't react, the last part will take care of it. ... Well, should.
-                        },
-                        // If any error occurs, break. Dropping is handled elsewhere
-                        Err(_) => break,
-                    }
-                }
-                last_time = curr_time;
+                trace!("Checking for death.");
                 match rx.try_recv() {
                     // Cannot handle messages
-                    Ok(_) => panic!("Unexpected input"),
+                    Ok(_) => panic!("Unexpected input into thread control channel."),
                     // No input means continue
-                    Err(TryRecvError::Empty) => continue,
+                    Err(TryRecvError::Empty) => (),
                     // Outside was dropped, so stop this thread
-                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        info!("Completed");
+                        break
+                    },
                 };
+                let busy_time = Instant::now() - curr_start_time;
+                std::thread::sleep(target - busy_time);
+                let total_time = Instant::now() - curr_start_time;
+                trace!("{:?} spent busy in {:?} long loop.", busy_time, total_time);
             }
             info!("System state immediate thread winding down.");
-        }))
+        }).expect("Could not start event thread.... Welp I'm out.")
     }
     #[inline(always)]
     fn start_periodic_thread(
         s_m: Arc<Mutex<State>>,
         req_rx: Receiver<cb::RegRequest>,
         res_tx: Sender<cb::RegResponse>,
-    ) -> KillableThread {
+    ) -> KillableThread<()> {
         let (tx, rx) = channel();
-        KillableThread::new(tx, std::thread::spawn(move || {
+        KillableThread::new(tx, "Periodic Event Loop".to_string(), move || {
             info!("Starting system state periodic thread.");
             let mut man = cb::Manager::new();
-            let mut last_time = Instant::now();
+            let target = Duration::from_secs(1).checked_div(200).expect("A constant is taken to be equal to 0...");
             loop {
-                let curr_time = Instant::now();
-                match s_m.lock() {
-                    Ok(s_mg) => man.fire_and_clean_all(&*s_mg),
-                    Err(_) => (),
-                };
+                let curr_start_time = Instant::now();
+                trace!("Pulling callbacks.");
                 loop {
                     match req_rx.try_recv() {
                         // Cannot handle messages
                         Ok(req) => match res_tx.send(man.handle_req(req)) {
-                            Ok(_) => (), // everything is fine
-                            Err(_) => (), // Don't react, the last part will take care of it.
+                            Ok(_) => trace!("Request completed fully."),
+                            Err(_) => warn!("Request completed, but response could not be sent."),
                         },
                         // If any error occurs, break. Dropping is handled elsewhere
-                        Err(_) => break,
+                        Err(TryRecvError::Empty) => break,
+                        // Outside was dropped, so stop this thread
+                        Err(TryRecvError::Disconnected) => {
+                            warn!("Request channel dropped prior to exit.");
+                            break
+                        },
                     }
                 }
-                last_time = curr_time;
+                trace!("Firing all callbacks.");
+                match s_m.lock() {
+                    Ok(s_mg) => man.fire_and_clean_all(&*s_mg),
+                    Err(_) => error!("State is poisoned."),
+                };
+                trace!("Checking for death.");
                 match rx.try_recv() {
                     // Cannot handle messages
-                    Ok(_) => panic!("Unexpected input"),
+                    Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
                     // No input means continue
-                    Err(TryRecvError::Empty) => continue,
+                    Err(TryRecvError::Empty) => (),
                     // Outside was dropped, so stop this thread
-                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        info!("Completed");
+                        break
+                    },
                 };
+                let busy_time = Instant::now() - curr_start_time;
+                std::thread::sleep(target - busy_time);
+                let total_time = Instant::now() - curr_start_time;
+                trace!("{:?} spent busy in {:?} long loop.", busy_time, total_time);
             }
             info!("System state periodic thread winding down.");
-        }))
+        }).expect("Could not start event thread.... Welp I'm out.")
     }
     pub fn new() -> Manager {
         let (win_tx, win_rx) = channel();
@@ -186,14 +223,11 @@ impl Manager {
             Err(_) => panic!("Fack. Dropping all the registrations.")
         }
     }
-    pub fn finish(mut self) -> Result<(), (std::thread::Result<()>, std::thread::Result<()>)> {
-        // Drops input to trigger thread stops for poller
-        if let Some(pollers) = self.pollers.take() {
-            pollers.consume(|p| p.finish().expect("Meh, I was going to finish anyways."));
-        }
-        std::result::Result::Ok(())
+    pub fn finish(mut self) -> FinishResult {
+        self.pollers.take().map(|pollers| pollers.map(|p| p.finish()).as_tup())
     }
 }
+pub type FinishResult = Option<(super::kt::FinishResult<()>, super::kt::FinishResult<()>)>;
 impl Drop for Manager {
     fn drop(&mut self) {
         if let Some(_) = self.pollers {

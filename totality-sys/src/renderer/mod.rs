@@ -32,24 +32,24 @@ use self::hal::{
     command::*,
     pso::*,
 };
-use av::ArrayVec;
+use super::av::ArrayVec;
 use std::{
     ops::DerefMut,
     cell::{RefCell, Cell},
-    time::SystemTime,
+    time::{Instant, Duration, SystemTime},
     result::Result,
     sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, TryRecvError, RecvError, SendError}},
     mem::ManuallyDrop,
     ptr::read,
     thread::spawn,
 };
-use na::{Vector3, Vector4};
+use super::na::{Vector3, Vector4};
 use winit::Window;
-use super::threading::KillableThread;
-use super::super::geom;
+use super::kt::KillableThread;
+use super::geom::Scene;
 
 #[allow(dead_code)]
-use log::{info, error};
+use log::{error, warn, info, debug, trace};
 
 pub struct Renderer {
     current_frame: usize,
@@ -73,7 +73,7 @@ pub struct Renderer {
 
 pub trait RenderFn: FnMut(&mut Renderer) + Send + 'static {}
 impl <F> RenderFn for F where F: FnMut(&mut Renderer) + Send + 'static {}
-pub struct Color(pub na::Vector4<f32>);
+pub struct Color(pub Vector4<f32>);
 pub enum RenderReq {
     Clear(Color),
     Seq(Vec<RenderReq>),
@@ -393,16 +393,19 @@ impl Drop for Renderer {
 pub struct RenderStage {
     req_tx: Sender<RenderReq>,
     // update_rx: Receiver<geom::Frame>,
-    scene: Arc<RwLock<Option<geom::Scene>>>,
-    render_thread: Option<KillableThread>,
+    scene: Arc<RwLock<Option<super::geom::Scene>>>,
+    render_thread: Option<KillableThread<()>>,
 }
 impl RenderStage {
-    fn start_render_thread(req_rx: Receiver<RenderReq>, w: Arc<Window>) -> KillableThread {
+    fn start_render_thread(req_rx: Receiver<RenderReq>, w: Arc<Window>) -> KillableThread<()> {
+        // create_killable_thread!("Render Stage", { }, { }, { });
         let (tx, rx) = channel();
-        KillableThread::new(tx, spawn(move || {
+        KillableThread::new(tx, "Render Stage".to_string(), move || {
             info!("Created rendering thread.");
-            let mut r = Renderer::new(&*w).expect("Fuck. Couldn't create a thingy-thing.");
+            let mut r = Renderer::new(&*w).expect("Fuck. Couldn't even create a thingy-thing.");
+            let target = Duration::from_secs(1).checked_div(200).expect("A constant is taken to be equal to 0...");
             loop {
+                let curr_start_time = Instant::now();
                 match req_rx.try_recv() {
                     // Cannot handle messages
                     Ok(req) => match Renderer::handle_req(&mut r, req) {
@@ -413,19 +416,27 @@ impl RenderStage {
                     Err(_) => (),
                 };
                 // try recv from rx + kill if dropped
+                trace!("Checking for death.");
                 match rx.try_recv() {
                     // Cannot handle messages
-                    Ok(_) => panic!("Unexpected input"),
+                    Ok(_) => panic!("Unexpected input into thread control channel."),
                     // No input means continue
-                    Err(TryRecvError::Empty) => continue,
+                    Err(TryRecvError::Empty) => (),
                     // Outside was dropped, so stop this thread
-                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        info!("Completed");
+                        break
+                    },
                 };
+                let busy_time = Instant::now() - curr_start_time;
+                std::thread::sleep(target - busy_time);
+                let total_time = Instant::now() - curr_start_time;
+                trace!("{:?} spent busy in {:?} long loop.", busy_time, total_time);
             }
             info!("Terminating rendering thread.");
-        }))
+        }).expect("Could not start render thread.... Welp I'm out.")
     }
-    pub fn new(sc_arc: Arc<RwLock<Option<geom::Scene>>>, w: Arc<Window>) -> RenderStage {
+    pub fn new(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>) -> RenderStage {
         let (req_tx, req_rx) = channel();
         RenderStage {
             req_tx: req_tx,
@@ -434,13 +445,11 @@ impl RenderStage {
         }
     }
     pub fn send_cmd(&self, q: RenderReq) -> Result<(), SendError<RenderReq>> { self.req_tx.send(q) }
-    pub fn finish(mut self) -> Result<(), String> {
-        if let Some(rt) = self.render_thread.take() {
-            rt.finish().expect("Hurry up and finish, please.")
-        }
-        std::result::Result::Ok(())
+    pub fn finish(mut self) -> FinishResult {
+        self.render_thread.take().map_or_else(|| Option::None, |kt| kt.finish())
     }
 }
+pub type FinishResult = super::kt::FinishResult<()>;
 impl Drop for RenderStage {
     fn drop(&mut self) {
         if self.render_thread.is_some() {

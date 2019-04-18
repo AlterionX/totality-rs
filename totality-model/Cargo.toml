@@ -1,0 +1,14 @@
+[package]
+name = "totality-model"
+version = "0.1.0"
+authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+nalgebra = "0.18"
+log = "0.4.0"
+simple_logger = "1.0"
+arrayvec = "0.4.10"
+syn = "0.15.32"
+quote = "0.6"
+

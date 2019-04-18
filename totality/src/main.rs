@@ -4,15 +4,13 @@ extern crate winit;
 extern crate simple_logger;
 extern crate log;
 extern crate arrayvec as av;
-
-mod sys;
-mod geom;
+extern crate totality_sys as sys;
+extern crate totality_threading as th;
+extern crate totality_model as geom;
 
 use std::{
     option::Option,
     env::{args, Args},
-    result::Result,
-    string::String,
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant}
 };
@@ -133,18 +131,15 @@ impl State {
         // TODO query system state
         (*self.current_action.lock().unwrap()).clone()
     }
-    fn cleanup(mut self) -> Result<(), String> {
-        let mut res = Result::Err(String::from("Could not clean up State."));
+    fn cleanup(mut self) -> (Option<sys::io::FinishResult>, Option<sys::renderer::FinishResult>) {
         // TODO change to let chaining once available
-        info!("Shutting down system management.");
-        if let Option::Some(sys) = self.sys.take() {
-            res = std::result::Result::Ok(sys.finish().expect("Could not complete `Manager` finish."))
-        }
-        info!("Shutting down rendering systems.");
-        if let Some(rs) = self.rs.take() {
-            res = std::result::Result::Ok(rs.finish().expect("Could not complete `Manager` finish."))
-        }
-        res
+        ({
+            info!("Shutting down system management.");
+            self.sys.take().map(|s| s.finish())
+        }, {
+            info!("Shutting down rendering systems.");
+            self.rs.take().map(|r| r.finish())
+        })
     }
 }
 impl Drop for State {
@@ -163,19 +158,21 @@ fn main() {
     loop {
         let curr_frame = Instant::now();
         let time_step = curr_frame - last_frame;
-        info!("Frame begin. {:?} since last frame.", time_step);
+        trace!("Frame begin. {:?} since last frame.", time_step);
         let act = s.step(time_step);
         if act == Action::Exit { break }
         last_frame = curr_frame;
         let sim_duration = Instant::now() - curr_frame;
-        info!("Frame took {:?} to render.", sim_duration);
+        trace!("Frame took {:?} to render.", sim_duration);
         if target_micros_per_frame > sim_duration {
-            info!("Sleeping for {:?}.", target_micros_per_frame - sim_duration);
+            trace!("Sleeping for {:?}.", target_micros_per_frame - sim_duration);
             std::thread::sleep(target_micros_per_frame - sim_duration);
         }
     };
     info!("Beginning Cleanup!");
-    s.cleanup().expect("State cleanup failed.");
-    log::info!("And that's all for today, folks!")
+    match s.cleanup() {
+        _ => ()
+    }
+    info!("And that's all for today, folks!")
 }
 
