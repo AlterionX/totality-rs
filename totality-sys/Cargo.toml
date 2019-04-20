@@ -18,6 +18,7 @@ simple_logger = "1.0"
 arrayvec = "0.4.10"
 syn = "0.15.32"
 quote = "0.6"
+shaderc = "0.3.16"
 
 [dependencies.gfx-backend-vulkan]
 version = "0.1"

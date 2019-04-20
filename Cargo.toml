@@ -1,7 +1,8 @@
 [workspace]
 members = [
-    "totality",
-    "totality-sys",
-    "totality-model",
-    "totality-threading",
+    "totality",             # manages everything inbetween
+    "totality-sys",         # io + render
+    "totality-physics",     # physics sim
+    "totality-model",       # loader + combiner for data models for io, render, and physics
+    "totality-threading",   # threading
 ]

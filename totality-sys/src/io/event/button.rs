@@ -3,6 +3,7 @@ pub enum C {
     A(char), // Alpha-numeric + punctuation
     S(Key), // special, like ESC, ALT, SHIFT, etc.
     F(Flag), // flag, like window close
+    Ignored,
 }
 impl C {
     fn default_value(&self) -> V { V::default_value_of(&self) }

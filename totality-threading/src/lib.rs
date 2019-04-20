@@ -2,27 +2,86 @@ extern crate proc_macro;
 pub mod killable_thread;
 
 #[macro_export]
-macro_rules! create_killable_thread {
+macro_rules! create_kt {
     ( $type:ty, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
         {
+            use log::*;
+            use ::std::{
+                time::*,
+                sync::mpsc::*,
+            };
             let (tx, rx) = std::sync::mpsc::channel();
-            killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
-                $($head)*
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+                info!("Starting {:?} thread.", $name);
+                $($head)*;
                 loop {
-                    $($body)*
+                    let curr_start_time = Instant::now();
+                    $($body)*;
+                    trace!("Checking for {:?} thread's death.", $name);
                     match rx.try_recv() {
                         // Cannot handle messages
-                        Ok(_) => panic!("Unexpected input into thread control channel."),
+                        Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
                         // No input means continue
-                        Err(::std::sync::mpsc::TryRecvError::Empty) => (),
+                        Err(TryRecvError::Empty) => (),
                         // Outside was dropped, so stop this thread
-                        Err(::std::sync::mpsc::TryRecvError::Disconnected) => {
+                        Err(TryRecvError::Disconnected) => {
                             info!("Completed");
                             break
                         },
                     };
+                    let busy_time = Instant::now() - curr_start_time;
+                    trace!("{:?} thread spent {:?} busy in loop.", $name, busy_time);
                 }
-                $($tail)*
+                let ret = {
+                    $($tail)*
+                };
+                trace!("{:?} thread winding down.", $name);
+                ret
+            })
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! create_rated_kt {
+    ( $type:ty, $rate:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+        {
+            use log::*;
+            use ::std::{
+                time::*,
+                sync::mpsc::*,
+            };
+            use $crate::killable_thread::KillableThread;
+            let (tx, rx) = std::sync::mpsc::channel();
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+                info!("Starting {:?} thread.", $name);
+                $($head)*;
+                let target = Duration::from_secs(1).checked_div($rate).expect("A constant is taken to be equal to 0...");
+                loop {
+                    let curr_start_time = Instant::now();
+                    $($body)*;
+                    trace!("Checking for {:?} thread's death.", $name);
+                    match rx.try_recv() {
+                        // Cannot handle messages
+                        Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
+                        // No input means continue
+                        Err(TryRecvError::Empty) => (),
+                        // Outside was dropped, so stop this thread
+                        Err(TryRecvError::Disconnected) => {
+                            info!("{:?} thread completed.", $name);
+                            break
+                        },
+                    };
+                    let busy_time = Instant::now() - curr_start_time;
+                    std::thread::sleep(target - busy_time);
+                    let total_time = Instant::now() - curr_start_time;
+                    trace!("{:?} thread spent {:?} busy and {:?} total in loop.", busy_time, total_time);
+                }
+                let ret = {
+                    $($tail)*
+                }
+                trace!("{:?} thread winding down.");
+                ret
             })
         }
     }
@@ -30,9 +89,11 @@ macro_rules! create_killable_thread {
 
 #[test]
 pub fn run_test() {
-    let mut some_fun = vec![0, 1, 2, 3, 4];
+    use log::info;
+
+    let some_fun = vec![0, 1, 2, 3, 4];
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    match create_killable_thread!(String, ":", {
+    match create_kt!(String, ":", {
         let mut hello = Vec::new();
         hello.extend(some_fun);
         let mut count = 0;
@@ -40,10 +101,10 @@ pub fn run_test() {
         info!("We're looping!! We've reached this point {:?} times.", count);
         match tx.send(count.clone()) {
             Ok(()) => info!("Successfully sent integer!"),
-            Err(e) => info!("Unexpected behavior on iteration {:?}!", count),
+            Err(_) => info!("Unexpected behavior on iteration {:?}!", count),
         }
         count += 1;
-        if (count == 10) {
+        if count == 10 {
             drop(tx);
             break
         }
@@ -74,7 +135,7 @@ pub fn run_test() {
                 None => panic!("We should have gotten something back!"),
             }
         },
-        Err(e) => panic!("Unexpected error!"),
+        Err(_) => panic!("Unexpected error!"),
     }
     info!("No error!");
 }

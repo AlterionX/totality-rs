@@ -104,7 +104,7 @@ impl Manager {
     pub fn fire_and_clean_listing(&mut self, s: &State, vv: &mut Vec<V>) {
         let mut deallocs = Vec::new();
         let mut dealloc_idx = HashMap::new();
-        for v in vv.drain(..) {
+        for v in vv.iter() {
             match v {
                 V::Ignored => (),
                 _ => {
@@ -143,3 +143,4 @@ impl Manager {
         }
     }
 }
+

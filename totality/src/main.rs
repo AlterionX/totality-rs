@@ -15,26 +15,11 @@ use std::{
     time::{Duration, Instant}
 };
 
-use geom::Scene;
-use sys::{io, renderer::{Color, RenderStage, RenderReq}};
+use na::{Matrix3, U2};
+use geom::{Model, scene::{Scene, TriGeom}};
+use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{BT, DT, IT, Color, TypedRenderReq, RenderReq, TypedRenderStage}};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
-
-fn save(img: geom::Img) {
-    let rows = img.len() as u32;
-    let cols = img[0].len() as u32;
-    let mut buf = img::ImageBuffer::new(cols, rows);
-    for row in 0u32..rows {
-        for col in 0u32..cols {
-            let color = img[row as usize][col as usize];
-            buf.put_pixel(
-                col, row,
-                img::Rgb([color[0], color[1], color[2]])
-            );
-        }
-    }
-    buf.save("something.png").unwrap();
-}
 
 #[derive(Debug, Copy, Clone)]
 struct ConfigPaths<'a> {
@@ -65,7 +50,7 @@ enum Action { Continue, Exit, }
 struct State {
     sc: Arc<RwLock<Option<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
-    rs: Option<RenderStage>,
+    rs: Option<TypedRenderStage>,
     sys: Option<io::Manager>, // TODO check mutability constraints
     c: Config,
     // shutdown flow
@@ -74,27 +59,89 @@ struct State {
     // color flow
     color: Arc<Mutex<na::Vector4<f32>>>,
     color_changer: Arc<Mutex<io::cb::CBFn>>,
+    // color flow
+    tri_m: Arc<Mutex<Model>>,
+    tri_m_changer: Arc<Mutex<io::cb::CBFn>>,
 }
 impl State {
     fn new(cfg: Config) -> State {
         let mut sm = io::Manager::new();
-        let sc = Arc::new(RwLock::new(std::option::Option::None));
-        let renderer = Option::Some(RenderStage::new(sc.clone(), sm.win.clone()));
+        let c_tri = Arc::new(Box::new(geom::scene::TriGeom::new(
+             na::Matrix3::new(
+                 0.5,  0.5,  0f32,
+                -0.5,  0.5,  0f32,
+                 0f32, 0f32, 0f32,
+            ),
+            na::Vector3::new(0u32, 1, 2),
+        )) as Box<geom::Geom>);
+        let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
+            vec![c_tri.clone()],
+            vec![geom::Model::from_geom(c_tri.clone())]
+        ))));
+        let renderer = Option::Some(TypedRenderStage::create(sc.clone(), sm.win.clone()));
         // set up shutdown flow
         let c_act = Arc::new(Mutex::new(Action::Continue));
-        let internal_c_act = c_act.clone();
-        let cb_shutdown = Arc::new(Mutex::new(move |_: &io::e::State, _: &io::e::V| { debug!("What? You wanted to exit?"); (*internal_c_act.lock().unwrap()) = Action::Exit; }));
-        sm.reg_imm(io::e::b::C::F(io::e::b::Flag::Close).into(), cb_shutdown.clone());
+        let cb_shutdown = {
+            let c_act = c_act.clone();
+            cb_arc!("Exit", { debug!("What? You wanted to exit?"); (*c_act.lock().unwrap()) = Action::Exit; })
+        };
+        sm.reg_imm(b::C::F(b::Flag::Close).into(), cb_shutdown.clone());
+        sm.reg_imm(b::C::A('c').into(), cb_shutdown.clone());
+        sm.reg_imm(b::C::S(b::Key::Esc).into(), cb_shutdown.clone());
         // set up color flow
         let c_color = Arc::new(Mutex::new(na::Vector4::new(1f32,1f32,1f32,1f32)));
-        let internal_c_color = c_color.clone();
-        let cb_color = Arc::new(Mutex::new(move |_: &io::e::State, v: &io::e::V| {
-            match v {
-                io::e::V::P(io::e::p::V::MousePos(io::e::p::PosState(v))) => (*internal_c_color.lock().unwrap()) = na::Vector4::new(v[0], v[1], 1f32, 1f32),
-                _ => (),
-            }
-        }));
-        sm.reg_per(io::e::p::C::MousePos.into(), cb_color.clone());
+        let cb_color = {
+            let c_color = c_color.clone();
+            cb_arc!("Color from pos", v, s, {
+                trace!("Mouse pos update fired with {:?}", v);
+                let c = C::P(p::C::ScreenSz);
+                if let V::P(p::V::CursorPos(p::PosState(p))) = v {
+                    let e = s.get(&c);
+                    if let V::P(p::V::ScreenSz(p::SzState(sz))) = e {
+                        trace!("Current screen size: {:?}, Current cursor position: {:?}", sz, v);
+                        if let Ok(mut col) = c_color.lock() {
+                            (*col) = na::Vector4::new(p[0] / sz[0], p[1] / sz[1], 1f32, 1f32);
+                            trace!("Color applied: {:?}", col);
+                        } else {
+                            panic!("Mutex was poisoned! Can we really recover from this?");
+                        }
+                    } else {
+                        panic!("The library is wrong. It gave me {:?} when requesting for {:?}.", e, c);
+                    }
+                } else {
+                    panic!("I received an event I never signed up for....");
+                }
+            })
+        };
+        sm.reg_per(io::e::p::C::CursorPos.into(), cb_color.clone());
+        let c_tri_m = Arc::new(Mutex::new(geom::Model::from_geom(c_tri.clone())));
+        let cb_tri_m = {
+            let c_tri_m = c_tri_m.clone();
+            cb_arc!("TriPos", v, s, {
+                let c = C::P(p::C::ScreenSz);
+                if let V::P(p::V::CursorPos(p::PosState(p))) = v {
+                    let e = s.get(&c);
+                    if let V::P(p::V::ScreenSz(p::SzState(sz))) = e {
+                        trace!("Current screen size: {:?}, Current cursor position: {:?}", sz, v);
+                        if let Ok(mut tri_m) = c_tri_m.lock() {
+                            let div = p.component_div(&sz);
+                            let mut p = na::Vector3::new(div[0], div[1], 0f32);
+                            p *= 2f32;
+                            p -= na::Vector3::new(1f32, 1f32, 0f32);
+                            (*tri_m).set_off_v(&p);
+                            trace!("Triangle position changed to: {:?}", v);
+                        } else {
+                            panic!("Mutex was poisoned! Can we really recover from this?");
+                        }
+                    } else {
+                        panic!("The library is wrong. It gave me {:?} when requesting for {:?}.", e, c);
+                    }
+                } else {
+                    panic!("I received an event I never signed up for....");
+                }
+            })
+        };
+        sm.reg_per(io::e::p::C::CursorPos.into(), cb_tri_m.clone());
         info!("Finished initial setup.");
         State {
             sc: sc,
@@ -107,6 +154,9 @@ impl State {
             // color flow
             color: c_color,
             color_changer: cb_color,
+            // tri pos
+            tri_m: c_tri_m,
+            tri_m_changer: cb_tri_m,
         }
     }
     fn step(&mut self, delta: Duration) -> Action {
@@ -118,12 +168,15 @@ impl State {
         // render(&mut self.r, &self.sc).expect("Nothing should be wrong yet...");
         let original_color = self.color.lock().expect("Seriously?");
         if let Some(ref rs) = self.rs {
-            rs.send_cmd(RenderReq::Clear(Color(na::Vector4::new(
-                original_color[0] as f32,
-                original_color[1] as f32,
-                original_color[2] as f32,
-                original_color[3] as f32,
-            )))).expect("No problems expected.");
+            rs.send_cmd(RenderReq::Draw::<BT, DT, IT>(
+                    (*self.tri_m.lock().expect("The mutex for the triangle is poisoned.")).clone(),
+                    Color(na::Vector4::new(
+                            original_color[0] as f32,
+                            original_color[1] as f32,
+                            original_color[2] as f32,
+                            original_color[3] as f32,
+                    ))
+            )).expect("No problems expected.");
         }
         // Every <variable> invocations
         // TODO run cold logic
@@ -149,7 +202,7 @@ impl Drop for State {
 }
 
 fn main() {
-    simple_logger::init().unwrap();
+    // simple_logger::init().unwrap();
     info!("Constructing + starting up.");
     let mut s = State::new(Config::new(DEFAULT_CONFIGURATION_PATHS, args()));
     info!("Beginning Loop!");

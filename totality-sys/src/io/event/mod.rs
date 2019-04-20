@@ -81,7 +81,7 @@ impl From<b::V> for V {
     fn from(v: b::V) -> V { V::B(v) }
 }
 impl State {
-    pub fn update<'a, T>(&mut self, v: &'a V) -> (C, &'a V) {
+    pub fn update<'a>(&mut self, v: &'a V) -> (C, &'a V) {
         match v {
             V::Ignored => (C::Ignored, &V::Ignored),
             _ => {
