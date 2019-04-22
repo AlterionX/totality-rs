@@ -55,29 +55,29 @@ use log::{error, warn, info, debug, trace};
 const VERTEX_SOURCE: &str = include_str!("../../resources/shaders/basic.vert");
 const FRAGMENT_SOURCE: &str =  include_str!("../../resources/shaders/basic.frag");
 
-pub trait RendererCreator<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>>: Fn(&Window) -> Result<Renderer<B, D, I>, &'static str> + Send + 'static {}
-impl <F: Fn(&Window) -> Result<Renderer<B, D, I>, &'static str> + Send + 'static, B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> RendererCreator<B, D, I> for F {}
-pub trait RenderFn<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>>: FnMut(&mut Renderer<B, D, I>) + Send + 'static {}
-impl <F: FnMut(&mut Renderer<B, D, I>) + Send + 'static, B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> RenderFn<B, D, I> for F {}
+pub trait RendererCreator<I: Instance>: Fn(&Window) -> Result<Renderer<I>, &'static str> + Send + 'static {}
+impl <F: Fn(&Window) -> Result<Renderer<I>, &'static str> + Send + 'static, I: Instance> RendererCreator<I> for F {}
+pub trait RenderFn<I: Instance>: FnMut(&mut Renderer<I>) + Send + 'static {}
+impl <F: FnMut(&mut Renderer<I>) + Send + 'static, I: Instance> RenderFn<I> for F {}
 pub struct Color(pub Vector4<f32>);
-pub enum RenderReq<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> {
+pub enum RenderReq<I: Instance> {
     Restart,
     Clear(Color),
-    Seq(Vec<RenderReq<B, D, I>>),
+    Seq(Vec<RenderReq<I>>),
     Draw(geom::Model, Color),
-    Free(Arc<Mutex<RenderFn<B, D, I>>>),
+    Free(Arc<Mutex<RenderFn<I>>>),
 }
 
-pub struct AllocatedBuffer<B: Backend<Device=D>, D: Device<B>> {
+pub struct AllocatedBuffer<B: Backend> {
     mem: ManuallyDrop<<B>::Memory>,
     reqs: memory::Requirements,
     buf: ManuallyDrop<<B>::Buffer>,
-    dev: PhantomData<D>,
+    dev: PhantomData<<B>::Device>,
     name: String,
     dropped: bool,
 }
-impl<B: Backend<Device=D>, D: Device<B>> AllocatedBuffer<B, D> {
-    fn new(adapter: &Adapter<B>, dev: &D, name: Option<String>, sz: u64, usage: buffer::Usage) -> Result<Self, &'static str> {
+impl<B: Backend> AllocatedBuffer<B> {
+    fn new(adapter: &Adapter<B>, dev: &<B>::Device, name: Option<String>, sz: u64, usage: buffer::Usage) -> Result<Self, &'static str> {
         let name = name.unwrap_or("<unknown>".to_string());
         let mut buffer = unsafe {
             dev.create_buffer(sz, usage)
@@ -101,7 +101,7 @@ impl<B: Backend<Device=D>, D: Device<B>> AllocatedBuffer<B, D> {
             dropped: false,
         })
     }
-    fn manual_drop(&mut self, dev: &D) {
+    fn manual_drop(&mut self, dev: &<B>::Device) {
         if !self.dropped { unsafe {
             dev.destroy_buffer(ManuallyDrop::into_inner(read(&mut self.buf)));
             dev.free_memory(ManuallyDrop::into_inner(read(&mut self.mem)));
@@ -112,7 +112,7 @@ impl<B: Backend<Device=D>, D: Device<B>> AllocatedBuffer<B, D> {
         } }
     }
 }
-// impl <B: Backend<Device=D>, D: Device<B>> Drop for AllocatedBuffer<B, D> {
+// impl <B: Backend<Device=D>, D: Device<I::Backend as Backend>> Drop for AllocatedBuffer<B, D> {
 //     fn drop(&mut self) {
 //         if !self.dropped {
 //             panic!("Allocated buffers must be manually dropped!");
@@ -120,38 +120,42 @@ impl<B: Backend<Device=D>, D: Device<B>> AllocatedBuffer<B, D> {
 //     }
 // }
 
-pub struct Renderer<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> {
+struct Sample<B: Backend> {
+    in_flight_fences: Vec<<B as Backend>::Fence>,
+}
+
+pub struct Renderer<I: Instance> {
     current_frame: usize,
     max_frames_in_flight: usize,
 
-    in_flight_fences: Vec<<B>::Fence>,
-    render_finished_semaphores: Vec<<B>::Semaphore>,
-    image_available_semaphores: Vec<<B>::Semaphore>,
+    in_flight_fences: Vec<<<I>::Backend as Backend>::Fence>,
+    render_finished_semaphores: Vec<<<I>::Backend as Backend>::Semaphore>,
+    image_available_semaphores: Vec<<<I>::Backend as Backend>::Semaphore>,
 
-    command_buffers: Vec<CommandBuffer<B, Graphics, MultiShot, Primary>>,
-    command_pool: ManuallyDrop<CommandPool<B, Graphics>>,
+    command_buffers: Vec<CommandBuffer<<I>::Backend, Graphics, MultiShot, Primary>>,
+    command_pool: ManuallyDrop<CommandPool<<I>::Backend, Graphics>>,
 
-    framebuffers: Vec<<B>::Framebuffer>,
-    image_views: Vec<(<B>::ImageView)>,
+    framebuffers: Vec<<<I>::Backend as Backend>::Framebuffer>,
+    image_views: Vec<(<<I>::Backend as Backend>::ImageView)>,
 
-    alloc_buffers: Vec<AllocatedBuffer<B, D>>,
+    alloc_buffers: Vec<AllocatedBuffer<<I>::Backend>>,
 
-    graphics_pipeline: ManuallyDrop<<B>::GraphicsPipeline>,
-    pipeline_layout: ManuallyDrop<<B>::PipelineLayout>,
-    descriptor_set_layouts: Vec<<B>::DescriptorSetLayout>,
+    graphics_pipeline: ManuallyDrop<<<I>::Backend as Backend>::GraphicsPipeline>,
+    pipeline_layout: ManuallyDrop<<<I>::Backend as Backend>::PipelineLayout>,
+    descriptor_set_layouts: Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
 
-    render_pass: ManuallyDrop<<B>::RenderPass>,
+    render_pass: ManuallyDrop<<<I>::Backend as Backend>::RenderPass>,
     render_area: Rect,
-    queue_group: ManuallyDrop<QueueGroup<B, Graphics>>,
-    swapchain: ManuallyDrop<<B>::Swapchain>,
+    queue_group: ManuallyDrop<QueueGroup<<I>::Backend, Graphics>>,
+    swapchain: ManuallyDrop<<<I>::Backend as Backend>::Swapchain>,
 
-    device: ManuallyDrop<D>,
-    _adapter: Adapter<B>,
-    _surface: <B>::Surface,
+    device: ManuallyDrop<<<I>::Backend as Backend>::Device>,
+    _adapter: Adapter<<I>::Backend>,
+    _surface: <<I>::Backend as Backend>::Surface,
     _instance: ManuallyDrop<I>,
 }
-impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, I> {
-    fn new(w: &Window, inst: I, mut surf: <B>::Surface) -> Result<Self, &'static str> {
+impl<I: Instance> Renderer<I> {
+    fn new(w: &Window, inst: I, mut surf: <<I>::Backend as Backend>::Surface) -> Result<Self, &'static str> {
         let adapter = hal::Instance::enumerate_adapters(&inst)
             .into_iter()
             .find(|a| {
@@ -254,9 +258,9 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
             (swapchain, extent, backbuffer, format, image_count as usize)
         };
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) = {
-            let mut image_available_semaphores: Vec<<B>::Semaphore> = vec![];
-            let mut render_finished_semaphores: Vec<<B>::Semaphore> = vec![];
-            let mut in_flight_fences: Vec<<B>::Fence> = vec![];
+            let mut image_available_semaphores = vec![];
+            let mut render_finished_semaphores = vec![];
+            let mut in_flight_fences = vec![];
             for _ in 0..max_frames_in_flight {
                 in_flight_fences.push(device.create_fence(true).map_err(|_| "Could not create a fence!")?);
                 image_available_semaphores.push(device.create_semaphore().map_err(|_| "Could not create a semaphore!")?);
@@ -318,7 +322,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
                 .collect::<Result<Vec<_>, &str>>()?,
             Backbuffer::Framebuffer(_) => unimplemented!("Can't handle framebuffer backbuffer!"),
         };
-        let framebuffers: Vec<<B>::Framebuffer> = {
+        let framebuffers = {
             image_views
                 .iter()
                 .map(|image_view| unsafe {
@@ -373,11 +377,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
         })
     }
     fn create_pipeline(
-        device: &mut D, extent: Extent2D, render_pass: &<B>::RenderPass,
+        device: &mut <<I>::Backend as Backend>::Device, extent: Extent2D, render_pass: &<<I>::Backend as Backend>::RenderPass,
       ) -> Result<(
-          Vec<<B>::DescriptorSetLayout>,
-          <B>::PipelineLayout,
-          <B>::GraphicsPipeline,
+          Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
+          <<I>::Backend as Backend>::PipelineLayout,
+          <<I>::Backend as Backend>::GraphicsPipeline,
     ), &'static str> {
         /****/
         let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
@@ -486,8 +490,8 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
             depth_bounds: None,
         };
         let bindings = Vec::<DescriptorSetLayoutBinding>::new();
-        let immutable_samplers = Vec::<<B>::Sampler>::new();
-        let descriptor_set_layouts: Vec<<B>::DescriptorSetLayout> = vec![unsafe {
+        let immutable_samplers = Vec::<<I::Backend as Backend>::Sampler>::new();
+        let descriptor_set_layouts: Vec<<I::Backend as Backend>::DescriptorSetLayout> = vec![unsafe {
             device
                 .create_descriptor_set_layout(bindings, immutable_samplers)
                 .map_err(|_| "Couldn't make a DescriptorSetLayout")?
@@ -637,7 +641,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
                 );
                 encoder.bind_graphics_pipeline(&self.graphics_pipeline);
                 // Here we must force the Deref impl of ManuallyDrop to play nice.
-                let buffer_ref: &<B>::Buffer = &self.alloc_buffers[0].buf;
+                let buffer_ref: &<I::Backend as Backend>::Buffer = &self.alloc_buffers[0].buf;
                 let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
                 encoder.bind_vertex_buffers(0, buffers);
                 encoder.push_graphics_constants(
@@ -674,7 +678,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
         }
         av
     }
-    fn handle_req(r: &mut Renderer<B, D, I>, q: RenderReq<B, D, I>) -> Result<(), &'static str> {
+    fn handle_req(r: &mut Renderer<I>, q: RenderReq<I>) -> Result<(), &'static str> {
         match q {
             RenderReq::Clear(Color(c)) => r.clear_color(c),
             RenderReq::Draw(m, Color(c)) => r.draw_geom(m, c),
@@ -692,7 +696,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<B, D, 
         }
     }
 }
-impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Drop for Renderer<B, D, I> {
+impl <I: Instance> Drop for Renderer<I> {
     fn drop(&mut self) {
         self.device.wait_idle().expect("Welp, guess we can't do anything anymore. So I'll just panic here.");
         unsafe {
@@ -741,14 +745,14 @@ impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Drop for Rende
     }
 }
 
-pub struct RenderStage<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> {
-    req_tx: Sender<RenderReq<B, D, I>>,
+pub struct RenderStage<I: Instance> {
+    req_tx: Sender<RenderReq<I>>,
     // update_rx: Receiver<geom::Frame>,
     scene: Arc<RwLock<Option<Scene>>>,
     render_thread: Option<KillableThread<()>>,
 }
-impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> RenderStage<B, D, I> {
-    fn start_render_thread<F: RendererCreator<B, D, I>>(req_rx: Receiver<RenderReq<B, D, I>>, w: Arc<Window>, f: F) -> KillableThread<()> {
+impl <I: Instance> RenderStage<I> {
+    fn start_render_thread<F: RendererCreator<I>>(req_rx: Receiver<RenderReq<I>>, w: Arc<Window>, f: F) -> KillableThread<()> {
         th::create_kt!((), "Render Stage", {
             let mut r = f(&*w).expect("Fuck. Couldn't even create a thingy-thing.");
         }, {
@@ -769,7 +773,7 @@ impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> RenderStage<B,
             } else { warn!("Request channel lost prior to shutdown!"); }
         }, {}).expect("Could not start render thread.... Welp I'm out.")
     }
-    fn new<F: RendererCreator<B, D, I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<B, D, I> {
+    fn new<F: RendererCreator<I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
         let (req_tx, req_rx) = channel();
         RenderStage {
             req_tx: req_tx,
@@ -777,13 +781,13 @@ impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> RenderStage<B,
             render_thread: Option::Some(Self::start_render_thread(req_rx, w, f)),
         }
     }
-    pub fn send_cmd(&self, q: RenderReq<B, D, I>) -> Result<(), SendError<RenderReq<B, D, I>>> { self.req_tx.send(q) }
+    pub fn send_cmd(&self, q: RenderReq<I>) -> Result<(), SendError<RenderReq<I>>> { self.req_tx.send(q) }
     pub fn finish(mut self) -> FinishResult {
         self.render_thread.take().map_or_else(|| Option::None, |kt| kt.finish())
     }
 }
 pub type FinishResult = super::kt::FinishResult<()>;
-impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Drop for RenderStage<B, D, I> {
+impl <I: Instance> Drop for RenderStage<I> {
     fn drop(&mut self) {
         if self.render_thread.is_some() {
             panic!("Must call finish on RenderStage before dropping.");
@@ -794,9 +798,9 @@ impl <B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Drop for Rende
 pub type BT = back::Backend;
 pub type DT = back::Device;
 pub type IT = back::Instance;
-pub type TypedRenderer = Renderer<BT, DT, IT>;
-pub type TypedRenderReq = RenderReq<BT, DT, IT>;
-pub type TypedRenderStage = RenderStage<BT, DT, IT>;
+pub type TypedRenderer = Renderer<IT>;
+pub type TypedRenderReq = RenderReq<IT>;
+pub type TypedRenderStage = RenderStage<IT>;
 impl TypedRenderer {
     fn create(w: &Window) -> Result<TypedRenderer, &'static str> {
         let inst = back::Instance::create("Tracer", 1);

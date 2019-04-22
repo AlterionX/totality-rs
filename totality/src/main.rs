@@ -168,7 +168,7 @@ impl State {
         // render(&mut self.r, &self.sc).expect("Nothing should be wrong yet...");
         let original_color = self.color.lock().expect("Seriously?");
         if let Some(ref rs) = self.rs {
-            rs.send_cmd(RenderReq::Draw::<BT, DT, IT>(
+            rs.send_cmd(RenderReq::Draw(
                     (*self.tri_m.lock().expect("The mutex for the triangle is poisoned.")).clone(),
                     Color(na::Vector4::new(
                             original_color[0] as f32,
