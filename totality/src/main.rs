@@ -17,7 +17,7 @@ use std::{
 
 use na::{Matrix3, U2};
 use geom::{Model, scene::{Scene, TriGeom}};
-use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{BT, DT, IT, Color, TypedRenderReq, RenderReq, TypedRenderStage}};
+use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{IT, Color, TypedRenderReq, RenderReq, TypedRenderStage}};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
 
@@ -73,7 +73,10 @@ impl State {
                  0f32, 0f32, 0f32,
             ),
             na::Vector3::new(0u32, 1, 2),
+            vec![[0f32, 0f32], [1f32, 0f32], [0f32, 1f32]],
         )) as Box<geom::Geom>);
+        info!("Constructed Triangle!");
+        info!("Tri stuffs: {:?}", c_tri.flattened_verts_as_floats());
         let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
             vec![c_tri.clone()],
             vec![geom::Model::from_geom(c_tri.clone())]
@@ -202,7 +205,7 @@ impl Drop for State {
 }
 
 fn main() {
-    // simple_logger::init().unwrap();
+    simple_logger::init().unwrap();
     info!("Constructing + starting up.");
     let mut s = State::new(Config::new(DEFAULT_CONFIGURATION_PATHS, args()));
     info!("Beginning Loop!");

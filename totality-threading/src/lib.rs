@@ -12,12 +12,12 @@ macro_rules! create_kt {
             };
             let (tx, rx) = std::sync::mpsc::channel();
             $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
-                info!("Starting {:?} thread.", $name);
+                info!("Starting {} thread.", $name);
                 $($head)*;
                 loop {
                     let curr_start_time = Instant::now();
                     $($body)*;
-                    trace!("Checking for {:?} thread's death.", $name);
+                    trace!("Checking for {} thread's death.", $name);
                     match rx.try_recv() {
                         // Cannot handle messages
                         Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
@@ -25,17 +25,17 @@ macro_rules! create_kt {
                         Err(TryRecvError::Empty) => (),
                         // Outside was dropped, so stop this thread
                         Err(TryRecvError::Disconnected) => {
-                            info!("Completed");
+                            info!("{} thread completed", $name);
                             break
                         },
                     };
                     let busy_time = Instant::now() - curr_start_time;
-                    trace!("{:?} thread spent {:?} busy in loop.", $name, busy_time);
+                    trace!("{} thread spent {:?} busy in loop.", $name, busy_time);
                 }
                 let ret = {
                     $($tail)*
                 };
-                trace!("{:?} thread winding down.", $name);
+                trace!("{} thread winding down.", $name);
                 ret
             })
         }
@@ -54,13 +54,13 @@ macro_rules! create_rated_kt {
             use $crate::killable_thread::KillableThread;
             let (tx, rx) = std::sync::mpsc::channel();
             $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
-                info!("Starting {:?} thread.", $name);
+                info!("Starting {} thread.", $name);
                 $($head)*;
                 let target = Duration::from_secs(1).checked_div($rate).expect("A constant is taken to be equal to 0...");
                 loop {
                     let curr_start_time = Instant::now();
                     $($body)*;
-                    trace!("Checking for {:?} thread's death.", $name);
+                    trace!("Checking for {} thread's death.", $name);
                     match rx.try_recv() {
                         // Cannot handle messages
                         Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
@@ -68,19 +68,19 @@ macro_rules! create_rated_kt {
                         Err(TryRecvError::Empty) => (),
                         // Outside was dropped, so stop this thread
                         Err(TryRecvError::Disconnected) => {
-                            info!("{:?} thread completed.", $name);
+                            info!("{} thread completed.", $name);
                             break
                         },
                     };
                     let busy_time = Instant::now() - curr_start_time;
                     std::thread::sleep(target - busy_time);
                     let total_time = Instant::now() - curr_start_time;
-                    trace!("{:?} thread spent {:?} busy and {:?} total in loop.", busy_time, total_time);
+                    trace!("{} thread spent {:?} busy and {:?} total in loop.", busy_time, total_time);
                 }
                 let ret = {
                     $($tail)*
                 }
-                trace!("{:?} thread winding down.");
+                trace!("{} thread winding down.");
                 ret
             })
         }

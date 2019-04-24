@@ -22,6 +22,10 @@ extern crate gfx_backend_vulkan as back;
 
 extern crate gfx_hal as hal;
 
+mod shaders;
+mod buffers;
+mod texture;
+
 use self::hal::{
     *,
     format::*,
@@ -35,19 +39,18 @@ use self::hal::{
 use super::av::ArrayVec;
 use std::{
     ops::DerefMut,
-    cell::{RefCell, Cell},
-    time::{Instant, Duration, SystemTime},
-    result::Result,
-    sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, TryRecvError, RecvError, SendError}},
+    time::SystemTime,
+    sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, SendError}},
     mem::{size_of, ManuallyDrop},
     ptr::read,
-    thread::spawn,
     marker::PhantomData,
 };
-use super::na::{Vector3, Vector4};
+use super::na::Vector4;
 use winit::Window;
 use super::kt::KillableThread;
 use super::geom::{self, scene::Scene};
+use buffers::{AllocatedBuffer, LoadedBuffer};
+use shaders::{ShaderInfo, CompiledShader};
 
 #[allow(dead_code)]
 use log::{error, warn, info, debug, trace};
@@ -68,62 +71,6 @@ pub enum RenderReq<I: Instance> {
     Free(Arc<Mutex<RenderFn<I>>>),
 }
 
-pub struct AllocatedBuffer<B: Backend> {
-    mem: ManuallyDrop<<B>::Memory>,
-    reqs: memory::Requirements,
-    buf: ManuallyDrop<<B>::Buffer>,
-    dev: PhantomData<<B>::Device>,
-    name: String,
-    dropped: bool,
-}
-impl<B: Backend> AllocatedBuffer<B> {
-    fn new(adapter: &Adapter<B>, dev: &<B>::Device, name: Option<String>, sz: u64, usage: buffer::Usage) -> Result<Self, &'static str> {
-        let name = name.unwrap_or("<unknown>".to_string());
-        let mut buffer = unsafe {
-            dev.create_buffer(sz, usage)
-        }.map_err(|_| "Couldn't create a buffer for the vertices")?;
-        let requirements = unsafe { dev.get_buffer_requirements(&buffer) };
-        let memory_type_id = adapter.physical_device.memory_properties().memory_types
-            .iter().enumerate().find(|&(id, memory_type)| {
-                requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(memory::Properties::CPU_VISIBLE)
-            }).map(|(id, _)| MemoryTypeId(id))
-            .ok_or("Couldn't find a memory type to support the vertex buffer!")?;
-        let memory = unsafe { dev.allocate_memory(memory_type_id, requirements.size) }
-            .map_err(|_| "Couldn't allocate vertex buffer memory")?;
-        unsafe { dev.bind_buffer_memory(&memory, 0, &mut buffer) }
-            .map_err(|_| "Couldn't bind the buffer memory!")?;
-        Result::Ok(AllocatedBuffer {
-            buf: ManuallyDrop::new(buffer),
-            reqs: requirements,
-            mem: ManuallyDrop::new(memory),
-            dev: PhantomData,
-            name: name,
-            dropped: false,
-        })
-    }
-    fn manual_drop(&mut self, dev: &<B>::Device) {
-        if !self.dropped { unsafe {
-            dev.destroy_buffer(ManuallyDrop::into_inner(read(&mut self.buf)));
-            dev.free_memory(ManuallyDrop::into_inner(read(&mut self.mem)));
-
-            ManuallyDrop::drop(&mut self.mem);
-            ManuallyDrop::drop(&mut self.buf);
-            self.dropped = true;
-        } }
-    }
-}
-// impl <B: Backend<Device=D>, D: Device<I::Backend as Backend>> Drop for AllocatedBuffer<B, D> {
-//     fn drop(&mut self) {
-//         if !self.dropped {
-//             panic!("Allocated buffers must be manually dropped!");
-//         }
-//     }
-// }
-
-struct Sample<B: Backend> {
-    in_flight_fences: Vec<<B as Backend>::Fence>,
-}
-
 pub struct Renderer<I: Instance> {
     current_frame: usize,
     max_frames_in_flight: usize,
@@ -139,6 +86,7 @@ pub struct Renderer<I: Instance> {
     image_views: Vec<(<<I>::Backend as Backend>::ImageView)>,
 
     alloc_buffers: Vec<AllocatedBuffer<<I>::Backend>>,
+    loaded_buffers: Vec<LoadedBuffer<Box<geom::Geom>, <I>::Backend>>,
 
     graphics_pipeline: ManuallyDrop<<<I>::Backend as Backend>::GraphicsPipeline>,
     pipeline_layout: ManuallyDrop<<<I>::Backend as Backend>::PipelineLayout>,
@@ -292,11 +240,22 @@ impl<I: Instance> Renderer<I> {
                     .map_err(|_| "Couldn't create a render pass!")?
             }
         };
+        let loaded_buffers = vec![];
         let alloc_buffers = vec![
             AllocatedBuffer::new(
-                &adapter, &device, Option::None,
-                (size_of::<f32>() * 3 * 3) as u64,
+                &adapter, &device, None,
+                (3 * geom::Vertex::packed_sz()) as u64,
                 buffer::Usage::VERTEX
+            )?,
+            AllocatedBuffer::new(
+                &adapter, &device, None,
+                (3 * geom::Face::packed_sz()) as u64,
+                buffer::Usage::INDEX
+            )?,
+            AllocatedBuffer::new(
+                &adapter, &device, None,
+                (3 * geom::Face::packed_sz()) as u64,
+                buffer::Usage::INDEX
             )?
         ];
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
@@ -365,6 +324,7 @@ impl<I: Instance> Renderer<I> {
             descriptor_set_layouts: descriptor_set_layouts,
 
             alloc_buffers: alloc_buffers,
+            loaded_buffers: loaded_buffers,
 
             render_pass: ManuallyDrop::new(render_pass),
             render_area: Extent::rect(&extent.to_extent()),
@@ -376,80 +336,98 @@ impl<I: Instance> Renderer<I> {
             _instance: ManuallyDrop::new(inst),
         })
     }
-    fn create_pipeline(
-        device: &mut <<I>::Backend as Backend>::Device, extent: Extent2D, render_pass: &<<I>::Backend as Backend>::RenderPass,
-      ) -> Result<(
-          Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
-          <<I>::Backend as Backend>::PipelineLayout,
-          <<I>::Backend as Backend>::GraphicsPipeline,
-    ), &'static str> {
-        /****/
+    fn compile_shaders<'a, 'device>(
+        device: &'device mut <I::Backend as Backend>::Device,
+        mut shaders: Vec<ShaderInfo<'a>>,
+    ) -> Result<Vec<CompiledShader<'a, I::Backend>>, &'static str> {
         let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
-        let vertex_compile_artifact = compiler.compile_into_spirv(
-            VERTEX_SOURCE, shaderc::ShaderKind::Vertex,
-            "vertex.vert", "main", None
-        ).map_err(|_| "Couldn't compile vertex shader!")?;
-        let fragment_compile_artifact = compiler.compile_into_spirv(
-            FRAGMENT_SOURCE, shaderc::ShaderKind::Fragment,
-            "fragment.frag", "main",
-            None
-        ).map_err(|e| {
-            error!("{}", e);
-            "Couldn't compile fragment shader!"
-        })?;
-        let vertex_shader_module = unsafe {
-            device.create_shader_module(vertex_compile_artifact.as_binary_u8()).map_err(|_| "Couldn't make the vertex module")?
-        };
-        let fragment_shader_module = unsafe {
-            device.create_shader_module(fragment_compile_artifact.as_binary_u8()).map_err(|_| "Couldn't make the fragment module")?
-        };
-        let (vs_entry, fs_entry) = (
-          EntryPoint {
-            entry: "main",
-            module: &vertex_shader_module,
-            specialization: Specialization {
-              constants: &[],
-              data: &[],
-            },
-          },
-          EntryPoint {
-            entry: "main",
-            module: &fragment_shader_module,
-            specialization: Specialization {
-              constants: &[],
-              data: &[],
-            },
-          },
-        );
+        let mut compiled_shaders = Vec::with_capacity(size_of::<CompiledShader<'a, I::Backend>>() * shaders.len());
+        for si in shaders.drain(..) {
+            compiled_shaders.push(CompiledShader::new(&mut compiler, device, si)?)
+        }
+        Ok(compiled_shaders)
+    }
+    fn destroy_shader_modules(
+        device: &mut <I::Backend as Backend>::Device,
+        mut modules: Vec<CompiledShader<I::Backend>>,
+    ) {
+        for module in modules.drain(..) {
+            module.destroy(device);
+        }
+    }
+    fn create_shaders<'a>(dev: &mut <I::Backend as Backend>::Device) -> Result<
+        Vec<CompiledShader<'a, I::Backend>>, &'static str
+    > {
+        Self::compile_shaders(dev, vec![ShaderInfo {
+            kind: shaderc::ShaderKind::Vertex,
+            name: "basic.vert",
+            entry_fn: "main",
+            src: VERTEX_SOURCE,
+            opts: None,
+        }, ShaderInfo {
+            kind: shaderc::ShaderKind::Fragment,
+            name: "basic.frag",
+            entry_fn: "main",
+            src: FRAGMENT_SOURCE,
+            opts: None,
+        }])
+    }
+    fn vertex_attribs() -> Result<Vec<AttributeDesc>, &'static str> {
+        let aa = geom::Vertex::attributes();
+        let strides = geom::Vertex::packed_sz();
+        let mut curr_loc = 0;
+        let mut curr_binding = 0;
+        let mut descs = Vec::new();
+        for a in aa.iter() {
+            trace!("Converting {:?} to AttributeDesc.", a);
+            descs.push(AttributeDesc {
+                location: curr_loc,
+                binding: 0,
+                element: Element {
+                    format: match a.elemsize {
+                        4 => Ok(Format::R32Float),
+                        8 => Ok(Format::Rg32Float),
+                        12 => Ok(Format::Rgb32Float),
+                        _ => Err("Could not match size to format.")
+                    }?,
+                    offset: a.offset as u32,
+                }
+            });
+            curr_loc += 1;
+        }
+        Ok(descs)
+    }
+    fn face_index_type() -> IndexType {
+        // TODO do this smarter
+        IndexType::U32
+    }
+    fn create_pipeline(
+        device: &mut <I::Backend as Backend>::Device, extent: Extent2D, render_pass: &<<I>::Backend as Backend>::RenderPass,
+    ) -> Result<(
+        Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
+        <<I>::Backend as Backend>::PipelineLayout,
+        <<I>::Backend as Backend>::GraphicsPipeline,
+    ), &'static str> {
+        let compiled_shaders = Self::create_shaders(device)?;
         let shaders = GraphicsShaderSet {
-          vertex: vs_entry,
-          hull: None,
-          domain: None,
-          geometry: None,
-          fragment: Some(fs_entry),
+            vertex: compiled_shaders[0].get_entry(Specialization {
+                constants: &[],
+                data: &[],
+            }),
+            hull: None,
+            domain: None,
+            geometry: None,
+            fragment: Some(compiled_shaders[1].get_entry(Specialization {
+                constants: &[],
+                data: &[],
+            })),
         };
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (size_of::<f32>() * 3) as ElemStride,
+            stride: geom::Vertex::packed_sz() as ElemStride,
             rate: 0,
         }];
-        let vert_data_attr = AttributeDesc {
-            location: 0,
-            binding: 0,
-            element: Element {
-                format: Format::Rgb32Float,
-                offset: 0,
-            },
-        };
-        let color_attr = AttributeDesc { // per vertex attribute
-            location: 1,
-            binding: 0,
-            element: Element {
-                format: Format::Rgb32Float,
-                offset: (size_of::<f32>() * 3) as ElemOffset, // byte offset from start of vertex data chunk
-            },
-        };
-        let attributes: Vec<AttributeDesc> = vec![vert_data_attr];
+        let attributes = Self::vertex_attribs()?;
         let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
         let rasterizer = Rasterizer {
             depth_clamping: false,
@@ -492,14 +470,16 @@ impl<I: Instance> Renderer<I> {
         let bindings = Vec::<DescriptorSetLayoutBinding>::new();
         let immutable_samplers = Vec::<<I::Backend as Backend>::Sampler>::new();
         let descriptor_set_layouts: Vec<<I::Backend as Backend>::DescriptorSetLayout> = vec![unsafe {
-            device
-                .create_descriptor_set_layout(bindings, immutable_samplers)
+            device.create_descriptor_set_layout(bindings, immutable_samplers)
                 .map_err(|_| "Couldn't make a DescriptorSetLayout")?
         }];
         let push_constants: Vec<(ShaderStageFlags, std::ops::Range<u32>)> = vec![
             (ShaderStageFlags::FRAGMENT, 0..4)
         ];
-        let layout = unsafe { device.create_pipeline_layout(&descriptor_set_layouts, push_constants).map_err(|_| "Couldn't create a pipeline layout")? };
+        let layout = unsafe {
+            device.create_pipeline_layout(&descriptor_set_layouts, push_constants)
+                .map_err(|_| "Couldn't create a pipeline layout")?
+        };
         /****/
         let gp = {
             let desc = GraphicsPipelineDesc {
@@ -520,12 +500,12 @@ impl<I: Instance> Renderer<I> {
                 flags: PipelineCreationFlags::empty(),
                 parent: BasePipeline::None,
             };
-            unsafe { device.create_graphics_pipeline(&desc, None).map_err(|_| "Couldn't create a graphics pipeline!")? }
+            unsafe {
+                device.create_graphics_pipeline(&desc, None)
+                    .map_err(|_| {"Couldn't create a graphics pipeline!"})?
+            }
         };
-        unsafe {
-            device.destroy_shader_module(vertex_shader_module);
-            device.destroy_shader_module(fragment_shader_module);
-        }
+        Self::destroy_shader_modules(device, compiled_shaders);
         Result::Ok((descriptor_set_layouts, layout, gp))
     }
     fn draw_empty_scene(&mut self) -> Result<(), &'static str> {
@@ -592,7 +572,7 @@ impl<I: Instance> Renderer<I> {
         }
     }
     fn draw_geom<C: Into<[f32; 4]>>(&mut self, m: geom::Model, color: C) -> Result<(), &'static str> {
-        // TODO FRAME PREP
+        // FRAME PREP
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
         // Advance the frame _before_ we start using the `?` operator
@@ -613,18 +593,31 @@ impl<I: Instance> Renderer<I> {
                 .reset_fence(flight_fence)
                 .map_err(|_| "Couldn't reset the fence!")?;
         }
-        // WRITE THE TRIANGLE DATA
-        unsafe {
-            let ref buffer = self.alloc_buffers[0];
-            let mut data_target = self.device
-                .acquire_mapping_writer(&buffer.mem, 0..buffer.reqs.size)
-                .map_err(|_| "Failed to acquire a memory writer!")?;
-            let points = m.transformed_flat_v();
-            trace!("Drawing points {:?}", points);
-            data_target[..points.len()].copy_from_slice(&points);
-            self.device.release_mapping_writer(data_target)
-                .map_err(|_| "Couldn't release the mapping writer!")?;
-        }
+        // WRITE THE CHANGED DATA
+        let index_buffer = {
+            let mut found_buffer = None;
+            // TODO use a pointer map later
+            for b in self.loaded_buffers.iter() {
+                if b.matches_source(&m.source) {
+                    found_buffer = Some(b);
+                    break;
+                }
+            }
+            if let Some(b) = found_buffer { b } else {
+                let ff_bytes = m.ff_as_bytes();
+                self.loaded_buffers.push(LoadedBuffer::new(
+                    &self._adapter, &mut self.device,
+                    None,
+                    (&**m.source).packed_ff_sz() as u64, buffer::Usage::INDEX,
+                    &m.ff_as_bytes(), m.source.clone()
+                )?);
+                self.loaded_buffers.last().expect("Loaded buffer that was just pushed does not exist.")
+            }
+        };
+        let vert_buffer = {
+            self.alloc_buffers[0].load_data_from_slice(&mut self.device, &m.vv_as_bytes(), 0)?;
+            &self.alloc_buffers[0]
+        };
         // RECORD COMMANDS
         unsafe {
             let buffer = &mut self.command_buffers[img_idx_usize];
@@ -641,34 +634,39 @@ impl<I: Instance> Renderer<I> {
                 );
                 encoder.bind_graphics_pipeline(&self.graphics_pipeline);
                 // Here we must force the Deref impl of ManuallyDrop to play nice.
-                let buffer_ref: &<I::Backend as Backend>::Buffer = &self.alloc_buffers[0].buf;
-                let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
+                let vert_buffer_ref: &<I::Backend as Backend>::Buffer = &vert_buffer.buffer_ref();
+                let buffers: ArrayVec<[_; 1]> = [(vert_buffer_ref, 0)].into();
                 encoder.bind_vertex_buffers(0, buffers);
+                encoder.bind_index_buffer(buffer::IndexBufferView {
+                    buffer: index_buffer.buffer_ref(),
+                    offset: 0,
+                    index_type: Self::face_index_type(),
+                });
                 encoder.push_graphics_constants(
                     &self.pipeline_layout,
                     ShaderStageFlags::FRAGMENT,
                     0,
                     &Self::as_buffer(&color.into())
                 );
-                encoder.draw(0..3, 0..1);
+                encoder.draw_indexed(0..(m.source.packed_ff_sz() as u32), 0, 0..1);
             }
             buffer.finish();
         }
-        // submit buffers
+        // SUBMIT COMMANDS
         let command_buffers = &self.command_buffers[img_idx_usize..=img_idx_usize];
         let wait_semaphores: ArrayVec<[_; 1]> = [(image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
         let signal_semaphores: ArrayVec<[_; 1]> = [render_finished].into();
         let present_wait_semaphores: ArrayVec<[_; 1]> = [render_finished].into();
         let submission = Submission {
-          command_buffers,
-          wait_semaphores,
-          signal_semaphores,
+            command_buffers,
+            wait_semaphores,
+            signal_semaphores,
         };
         let the_command_queue = &mut self.queue_group.queues[0];
         unsafe {
-          the_command_queue.submit(submission, Some(flight_fence));
-          self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
-            .map_err(|_| "Failed to present into the swapchain!")
+            the_command_queue.submit(submission, Some(flight_fence));
+            self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
+                .map_err(|_| "Failed to present into the swapchain!")
         }
     }
     fn as_buffer(v: &[f32; 4]) -> [u32; 4] {
@@ -724,7 +722,10 @@ impl <I: Instance> Drop for Renderer<I> {
             }
 
             for mut b in self.alloc_buffers.drain(..) {
-                b.manual_drop(&self.device);
+                b.free(&self.device);
+            }
+            for mut b in self.loaded_buffers.drain(..) {
+                b.free(&self.device);
             }
 
             // The CommandPool must also be unwrapped into a RawCommandPool,
@@ -756,8 +757,8 @@ impl <I: Instance> RenderStage<I> {
         th::create_kt!((), "Render Stage", {
             let mut r = f(&*w).expect("Fuck. Couldn't even create a thingy-thing.");
         }, {
-            if let Ok(req) = req_rx.try_recv() {
-                if let RenderReq::Restart = req {
+            match req_rx.try_recv() {
+                Ok(req) => if let RenderReq::Restart = req {
                     drop(r);
                     r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
                 } else {
@@ -769,8 +770,10 @@ impl <I: Instance> RenderStage<I> {
                             r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
                         }
                     }
-                }
-            } else { warn!("Request channel lost prior to shutdown!"); }
+                },
+                Err(TryRecvError::Disconnected) => warn!("Request channel lost prior to shutdown!"),
+                Err(TryRecvError::Empty) => (),
+            }
         }, {}).expect("Could not start render thread.... Welp I'm out.")
     }
     fn new<F: RendererCreator<I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
@@ -795,8 +798,6 @@ impl <I: Instance> Drop for RenderStage<I> {
     }
 }
 
-pub type BT = back::Backend;
-pub type DT = back::Device;
 pub type IT = back::Instance;
 pub type TypedRenderer = Renderer<IT>;
 pub type TypedRenderReq = RenderReq<IT>;

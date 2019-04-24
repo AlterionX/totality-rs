@@ -4,7 +4,10 @@ extern crate log;
 
 pub mod scene;
 
-use std::sync::{Weak, Arc};
+use std::{
+    mem::size_of,
+    sync::{Weak, Arc},
+};
 use na::{
     U1, U3, Dynamic,
     Vector3,
@@ -25,12 +28,41 @@ pub trait Geom {
     fn faces(&self) -> &FMat;
     fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat { self.verts().clone() }
     fn culled_faces(&self, intersect_test: Box<IntersectTestable>) -> FMat { self.faces().clone() }
+    fn vert_cnt(&self) -> usize { self.verts().ncols() }
+    fn unpacked_verts(&self) -> &Vec<Vertex>;
+    fn unpacked_faces(&self) -> &Vec<Face>;
+    fn flattened_verts_as_bytes(&self) -> Vec<u32> {
+        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz());
+        for v in self.unpacked_verts().iter() {
+            v.pack_into(&mut flat);
+        }
+        flat
+    }
+    fn flattened_verts_as_floats(&self) -> Vec<f32> {
+        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz_float());
+        for v in self.unpacked_verts().iter() {
+            v.pack_into_float(&mut flat);
+            trace!("Inserting vert {:?}", v);
+        }
+        flat
+    }
+    fn flattened_faces_as_bytes(&self) -> Vec<u32> {
+        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz());
+        for f in self.unpacked_faces().iter() {
+            f.pack_into(&mut flat);
+        }
+        flat
+    }
+    fn n_vv(&self) -> usize { self.verts().ncols() }
+    fn n_ff(&self) -> usize { self.faces().ncols() }
+    fn packed_vv_sz(&self) -> usize { self.n_vv() * Vertex::packed_sz() }
+    fn packed_ff_sz(&self) -> usize { self.n_ff() * Face::packed_sz() }
 }
 // TODO should this be a trait?
 #[derive(Clone)]
 pub struct Model {
     iso: Isometry3<f32>,
-    source: Arc<Box<Geom>>,
+    pub source: Arc<Box<Geom>>,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
 }
@@ -59,25 +91,74 @@ impl Model {
     pub fn set_rot_q(&mut self, rot: &UnitQuaternion<f32>) { self.iso.rotation = rot.clone(); }
 
     pub fn flat_v(&self) -> Vec<f32> {
-        let vv = self.source.verts();
-        let mut flattened = Vec::with_capacity(vv.nrows() * 3);
-        for i in 0..vv.ncols() {
-            let p = vv.fixed_columns::<U1>(i);
-            flattened.extend(vec![p[0], p[1], p[2]]);
-        }
-        flattened
+        self.source.flattened_verts_as_floats()
     }
-    pub fn transformed_flat_v(&self) -> Vec<f32> {
-        let vv = self.source.verts();
-        let mut flattened = Vec::with_capacity(vv.nrows() * 3);
-        for i in 0..vv.ncols() {
-            let p_o = Point3::from(Vector3::from(vv.fixed_columns::<U1>(i)));
-            let p = self.iso * p_o;
-            trace!("Original point: {:?}; Transformed point: {:?}", p_o, p);
-            flattened.extend(vec![p[0], p[1], p[2]]);
-        }
-        flattened
+    pub fn vv_as_bytes(&self) -> Vec<u32> {
+        self.source.flattened_verts_as_bytes()
+    }
+    pub fn ff_as_bytes(&self) -> Vec<u32> {
+        self.source.flattened_faces_as_bytes()
     }
 }
 unsafe impl Send for Model {}
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct VertexInfo {
+    pub offset: usize,
+    pub elemsize: usize,
+}
+#[derive(Debug, Copy, Clone)]
+pub struct Vertex {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+}
+impl Vertex {
+    pub fn attributes() -> Vec<VertexInfo> {
+        let pos = VertexInfo {
+            offset: 0,
+            elemsize:  size_of::<[f32; 3]>(),
+        };
+        let uv = VertexInfo {
+            offset: size_of::<[f32; 3]>(),
+            elemsize:  size_of::<[f32; 2]>(),
+        };
+        vec![pos, uv]
+    }
+    pub fn packed_sz() -> usize { 5 * size_of::<u32>() }
+    fn pack_into(&self, buf: &mut Vec<u32>) {
+        for p_d in self.pos.iter() {
+            buf.push(p_d.clone().to_bits());
+        }
+        for uv_d in self.uv.iter() {
+            buf.push(uv_d.clone().to_bits());
+        }
+    }
+    fn packed_sz_float() -> usize { 5 * size_of::<f32>() }
+    fn pack_into_float(&self, buf: &mut Vec<f32>) {
+        for p_d in self.pos.iter() {
+            buf.push(p_d.clone());
+        }
+        for uv_d in self.uv.iter() {
+            buf.push(uv_d.clone());
+        }
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Face {
+    pub verts: [u32; 3],
+}
+impl Face {
+    pub fn attributes() -> Vec<VertexInfo> {
+        let verts = VertexInfo {
+            offset: 0,
+            elemsize: size_of::<[u32; 3]>(),
+        };
+        vec![verts]
+    }
+    pub fn packed_sz() -> usize { 3 * size_of::<u32>() }
+    fn pack_into(&self, buf: &mut Vec<u32>) {
+        for v_i_d in self.verts.iter() {
+            buf.push(v_i_d.clone());
+        }
+    }
+}
