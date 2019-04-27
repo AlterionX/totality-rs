@@ -36,7 +36,10 @@ impl <'a, B: Backend> CompiledShader<'a, B> {
             src, kind,
             name, entry_fn,
             opts
-        ).map_err(|_| "Could not compile shader!")?;
+        ).map_err(|e| {
+            error!("Error compiling shader {}: {:?}", si.name, e);
+            "Could not compile shader!"
+        })?;
         let module = unsafe {
             device.create_shader_module(compiled_artifact.as_binary_u8())
                 .map_err(|_| "Shader module creation failed!")?
@@ -48,12 +51,18 @@ impl <'a, B: Backend> CompiledShader<'a, B> {
             dropped: false
         })
     }
-    pub fn get_entry(&'a self, sp: Specialization<'a>) -> EntryPoint<'a, B> {
+    pub fn get_entry_specialized(&'a self, sp: Specialization<'a>) -> EntryPoint<'a, B> {
         EntryPoint {
             entry: self.entry_fn,
             module: &self.module,
             specialization: sp,
         }
+    }
+    pub fn get_entry(&'a self) -> EntryPoint<'a, B> {
+        self.get_entry_specialized(Specialization {
+            constants: &[],
+            data: &[],
+        })
     }
     pub fn destroy(mut self, device: &mut <B>::Device) {
         trace!("Shader has been dumped!");
@@ -72,3 +81,4 @@ impl <'a, B: Backend> Drop for CompiledShader<'a, B> {
         }
     }
 }
+

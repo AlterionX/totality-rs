@@ -17,6 +17,9 @@ impl From<&V> for C {
 impl <'a> From<&'a V> for &'a C {
     fn from(v: &V) -> &C { &v.0 }
 }
+impl From<char> for C {
+    fn from(c: char) -> C { C::A(c) }
+}
 
 // TODO look into distinctions between left and right ctrl, shift, alt, etc
 #[derive(Debug, Hash, Copy, Clone, PartialEq, Eq)]
@@ -58,7 +61,7 @@ pub enum State {
 }
 impl From<bool> for State {
     fn from(b: bool) -> State {
-        if b { State::UP } else { State::DOWN }
+        if b { State::DOWN } else { State::UP }
     }
 }
 impl From<State> for bool {

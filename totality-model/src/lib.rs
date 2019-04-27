@@ -3,6 +3,7 @@ extern crate arrayvec as av;
 extern crate log;
 
 pub mod scene;
+pub mod camera;
 
 use std::{
     mem::size_of,
@@ -16,7 +17,8 @@ use na::{
     Matrix,
     VecStorage,
 };
-use log::*;
+#[allow(dead_code)]
+use log::{trace, info, debug, warn, error};
 
 pub type VMat = Matrix<f32, U3, Dynamic, VecStorage<f32, U3, Dynamic>>;
 pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
@@ -32,32 +34,36 @@ pub trait Geom {
     fn unpacked_verts(&self) -> &Vec<Vertex>;
     fn unpacked_faces(&self) -> &Vec<Face>;
     fn flattened_verts_as_bytes(&self) -> Vec<u32> {
-        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz());
+        let mut flat = Vec::with_capacity(self.vv_flat_cnt());
         for v in self.unpacked_verts().iter() {
             v.pack_into(&mut flat);
         }
         flat
     }
     fn flattened_verts_as_floats(&self) -> Vec<f32> {
-        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz_float());
+        let mut flat = Vec::with_capacity(self.vv_flat_cnt());
         for v in self.unpacked_verts().iter() {
             v.pack_into_float(&mut flat);
-            trace!("Inserting vert {:?}", v);
         }
         flat
     }
     fn flattened_faces_as_bytes(&self) -> Vec<u32> {
-        let mut flat = Vec::with_capacity(self.vert_cnt() * Vertex::packed_sz());
+        let mut flat = Vec::with_capacity(self.ff_flat_cnt());
         for f in self.unpacked_faces().iter() {
             f.pack_into(&mut flat);
         }
         flat
     }
-    fn n_vv(&self) -> usize { self.verts().ncols() }
-    fn n_ff(&self) -> usize { self.faces().ncols() }
-    fn packed_vv_sz(&self) -> usize { self.n_vv() * Vertex::packed_sz() }
-    fn packed_ff_sz(&self) -> usize { self.n_ff() * Face::packed_sz() }
+    fn vv_elem_cnt(&self) -> usize { self.verts().ncols() }
+    fn ff_elem_cnt(&self) -> usize { self.faces().ncols() }
+    fn vv_flat_cnt(&self) -> usize { self.vv_elem_cnt() * Vertex::packed_flat_sz() }
+    fn ff_flat_cnt(&self) -> usize { self.ff_elem_cnt() * Face::packed_flat_sz() }
+    fn vv_byte_cnt(&self) -> usize { self.vv_elem_cnt() * Vertex::packed_byte_sz() }
+    fn ff_byte_cnt(&self) -> usize { self.ff_elem_cnt() * Face::packed_byte_sz() }
+    fn texture(&self) -> &Option<String>;
+    fn has_texture(&self) -> bool { self.texture().is_some() }
 }
+
 // TODO should this be a trait?
 #[derive(Clone)]
 pub struct Model {
@@ -124,7 +130,9 @@ impl Vertex {
         };
         vec![pos, uv]
     }
-    pub fn packed_sz() -> usize { 5 * size_of::<u32>() }
+    pub fn packed_elem_sz() -> usize { size_of::<u32>() }
+    pub fn packed_flat_sz() -> usize { 5 }
+    pub fn packed_byte_sz() -> usize { Self::packed_flat_sz() * Self::packed_elem_sz() }
     fn pack_into(&self, buf: &mut Vec<u32>) {
         for p_d in self.pos.iter() {
             buf.push(p_d.clone().to_bits());
@@ -155,10 +163,13 @@ impl Face {
         };
         vec![verts]
     }
-    pub fn packed_sz() -> usize { 3 * size_of::<u32>() }
+    pub fn packed_elem_sz() -> usize { size_of::<u32>() }
+    pub fn packed_flat_sz() -> usize { 3 }
+    pub fn packed_byte_sz() -> usize { Self::packed_flat_sz() * Self::packed_elem_sz() }
     fn pack_into(&self, buf: &mut Vec<u32>) {
         for v_i_d in self.verts.iter() {
             buf.push(v_i_d.clone());
         }
     }
 }
+

@@ -21,6 +21,7 @@ extern crate gfx_backend_metal as back;
 extern crate gfx_backend_vulkan as back;
 
 extern crate gfx_hal as hal;
+extern crate image as img;
 
 mod shaders;
 mod buffers;
@@ -43,7 +44,6 @@ use std::{
     sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, SendError}},
     mem::{size_of, ManuallyDrop},
     ptr::read,
-    marker::PhantomData,
 };
 use super::na::Vector4;
 use winit::Window;
@@ -51,6 +51,7 @@ use super::kt::KillableThread;
 use super::geom::{self, scene::Scene};
 use buffers::{AllocatedBuffer, LoadedBuffer};
 use shaders::{ShaderInfo, CompiledShader};
+use texture::LoadedImage;
 
 #[allow(dead_code)]
 use log::{error, warn, info, debug, trace};
@@ -67,7 +68,7 @@ pub enum RenderReq<I: Instance> {
     Restart,
     Clear(Color),
     Seq(Vec<RenderReq<I>>),
-    Draw(geom::Model, Color),
+    Draw(geom::Model, geom::camera::Camera, Color),
     Free(Arc<Mutex<RenderFn<I>>>),
 }
 
@@ -75,35 +76,39 @@ pub struct Renderer<I: Instance> {
     current_frame: usize,
     max_frames_in_flight: usize,
 
-    in_flight_fences: Vec<<<I>::Backend as Backend>::Fence>,
-    render_finished_semaphores: Vec<<<I>::Backend as Backend>::Semaphore>,
-    image_available_semaphores: Vec<<<I>::Backend as Backend>::Semaphore>,
+    in_flight_fences: Vec<<I::Backend as Backend>::Fence>,
+    render_finished_semaphores: Vec<<I::Backend as Backend>::Semaphore>,
+    image_available_semaphores: Vec<<I::Backend as Backend>::Semaphore>,
 
-    command_buffers: Vec<CommandBuffer<<I>::Backend, Graphics, MultiShot, Primary>>,
-    command_pool: ManuallyDrop<CommandPool<<I>::Backend, Graphics>>,
+    command_buffers: Vec<CommandBuffer<I::Backend, Graphics, MultiShot, Primary>>,
+    command_pool: ManuallyDrop<CommandPool<I::Backend, Graphics>>,
 
-    framebuffers: Vec<<<I>::Backend as Backend>::Framebuffer>,
-    image_views: Vec<(<<I>::Backend as Backend>::ImageView)>,
+    framebuffers: Vec<<I::Backend as Backend>::Framebuffer>,
+    image_views: Vec<(<I::Backend as Backend>::ImageView)>,
 
-    alloc_buffers: Vec<AllocatedBuffer<<I>::Backend>>,
-    loaded_buffers: Vec<LoadedBuffer<Box<geom::Geom>, <I>::Backend>>,
+    loaded_images: Vec<LoadedImage<I::Backend>>,
+    alloc_buffers: Vec<AllocatedBuffer<I::Backend>>,
+    loaded_buffers: Vec<LoadedBuffer<Box<geom::Geom>, I::Backend>>,
 
-    graphics_pipeline: ManuallyDrop<<<I>::Backend as Backend>::GraphicsPipeline>,
-    pipeline_layout: ManuallyDrop<<<I>::Backend as Backend>::PipelineLayout>,
-    descriptor_set_layouts: Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
+    descriptor_sets: Vec<<I::Backend as Backend>::DescriptorSet>,
+    descriptor_pool: ManuallyDrop<<I::Backend as Backend>::DescriptorPool>,
 
-    render_pass: ManuallyDrop<<<I>::Backend as Backend>::RenderPass>,
+    graphics_pipeline: ManuallyDrop<<I::Backend as Backend>::GraphicsPipeline>,
+    pipeline_layout: ManuallyDrop<<I::Backend as Backend>::PipelineLayout>,
+    descriptor_set_layouts: Vec<<I::Backend as Backend>::DescriptorSetLayout>,
+
+    render_pass: ManuallyDrop<<I::Backend as Backend>::RenderPass>,
     render_area: Rect,
-    queue_group: ManuallyDrop<QueueGroup<<I>::Backend, Graphics>>,
-    swapchain: ManuallyDrop<<<I>::Backend as Backend>::Swapchain>,
+    queue_group: ManuallyDrop<QueueGroup<I::Backend, Graphics>>,
+    swapchain: ManuallyDrop<<I::Backend as Backend>::Swapchain>,
 
-    device: ManuallyDrop<<<I>::Backend as Backend>::Device>,
-    _adapter: Adapter<<I>::Backend>,
-    _surface: <<I>::Backend as Backend>::Surface,
+    device: ManuallyDrop<<I::Backend as Backend>::Device>,
+    _adapter: Adapter<I::Backend>,
+    _surface: <I::Backend as Backend>::Surface,
     _instance: ManuallyDrop<I>,
 }
-impl<I: Instance> Renderer<I> {
-    fn new(w: &Window, inst: I, mut surf: <<I>::Backend as Backend>::Surface) -> Result<Self, &'static str> {
+impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
+    fn new(w: &Window, inst: I, mut surf: B::Surface) -> Result<Self, &'static str> {
         let adapter = hal::Instance::enumerate_adapters(&inst)
             .into_iter()
             .find(|a| {
@@ -241,25 +246,36 @@ impl<I: Instance> Renderer<I> {
             }
         };
         let loaded_buffers = vec![];
-        let alloc_buffers = vec![
-            AllocatedBuffer::new(
-                &adapter, &device, None,
-                (3 * geom::Vertex::packed_sz()) as u64,
-                buffer::Usage::VERTEX
-            )?,
-            AllocatedBuffer::new(
-                &adapter, &device, None,
-                (3 * geom::Face::packed_sz()) as u64,
-                buffer::Usage::INDEX
-            )?,
-            AllocatedBuffer::new(
-                &adapter, &device, None,
-                (3 * geom::Face::packed_sz()) as u64,
-                buffer::Usage::INDEX
-            )?
-        ];
+        let alloc_buffers = vec![AllocatedBuffer::new(
+            &adapter, &device, None,
+            (3 * geom::Vertex::packed_byte_sz()) as u64,
+            buffer::Usage::VERTEX
+        )?];
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
             Self::create_pipeline(&mut device, extent, &mut render_pass)?;
+        let mut descriptor_pool = unsafe { device.create_descriptor_pool(
+            max_frames_in_flight, // sets
+            &[gfx_hal::pso::DescriptorRangeDesc {
+                ty: gfx_hal::pso::DescriptorType::SampledImage,
+                count: max_frames_in_flight,
+            }, gfx_hal::pso::DescriptorRangeDesc {
+                ty: gfx_hal::pso::DescriptorType::Sampler,
+                count: max_frames_in_flight,
+            }],
+        ).map_err(|_| "Couldn't create a descriptor pool!")? };
+        let descriptor_sets = {
+            let mut sets = Vec::with_capacity(max_frames_in_flight);
+            for set_i in 0..max_frames_in_flight {
+                unsafe { match descriptor_pool.allocate_set(&descriptor_set_layouts[0]) {
+                    Ok(o) => sets.push(o),
+                    e @ Err(_) => {
+                        error!("{:?}", e);
+                        Err("Couldn't make a Descriptor Set!")?
+                    }
+                } }
+            }
+            sets
+        };
         let image_views: Vec<_> = match backbuffer {
             Backbuffer::Images(images) => images
                 .into_iter()
@@ -305,6 +321,9 @@ impl<I: Instance> Renderer<I> {
                 .map_err(|_| "Could not create the raw command pool!")?
         };
         let command_buffers: Vec<_> = framebuffers.iter().map(|_| command_pool.acquire_command_buffer()).collect();
+        // 4. You create the actual descriptors which you want to write into the
+        //    allocated descriptor set (in this case an image and a sampler)
+        let loaded_images = vec![];
         Result::Ok(Renderer {
             current_frame: 0,
             max_frames_in_flight: max_frames_in_flight,
@@ -319,10 +338,14 @@ impl<I: Instance> Renderer<I> {
             framebuffers: framebuffers,
             image_views: image_views,
 
+            descriptor_sets: descriptor_sets,
+            descriptor_pool: ManuallyDrop::new(descriptor_pool),
+
             graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             descriptor_set_layouts: descriptor_set_layouts,
 
+            loaded_images: loaded_images,
             alloc_buffers: alloc_buffers,
             loaded_buffers: loaded_buffers,
 
@@ -336,28 +359,43 @@ impl<I: Instance> Renderer<I> {
             _instance: ManuallyDrop::new(inst),
         })
     }
-    fn compile_shaders<'a, 'device>(
-        device: &'device mut <I::Backend as Backend>::Device,
-        mut shaders: Vec<ShaderInfo<'a>>,
-    ) -> Result<Vec<CompiledShader<'a, I::Backend>>, &'static str> {
+    fn layout_set_descs(dev: &mut D) -> Result<Vec<B::DescriptorSetLayout>, &'static str> {
+        let bindings = vec![DescriptorSetLayoutBinding {
+            binding: 0,
+            ty: gfx_hal::pso::DescriptorType::SampledImage,
+            count: 1,
+            stage_flags: ShaderStageFlags::FRAGMENT,
+            immutable_samplers: false,
+        }, DescriptorSetLayoutBinding {
+            binding: 1,
+            ty: gfx_hal::pso::DescriptorType::Sampler,
+            count: 1,
+            stage_flags: ShaderStageFlags::FRAGMENT,
+            immutable_samplers: false,
+        }];
+        let immutable_samplers = vec![];
+        let descriptor_set_layouts = vec![unsafe {
+            dev.create_descriptor_set_layout(&bindings, &immutable_samplers)
+                .map_err(|_| "Couldn't make a DescriptorSetLayout")?
+        }];
+        Ok(descriptor_set_layouts)
+    }
+    fn compile_shaders<'a, 'device>(device: &'device mut D, mut shaders: Vec<ShaderInfo<'a>>)
+        -> Result<Vec<CompiledShader<'a, B>>, &'static str>
+    {
         let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
-        let mut compiled_shaders = Vec::with_capacity(size_of::<CompiledShader<'a, I::Backend>>() * shaders.len());
+        let mut compiled_shaders = Vec::with_capacity(size_of::<CompiledShader<'a, B>>() * shaders.len());
         for si in shaders.drain(..) {
             compiled_shaders.push(CompiledShader::new(&mut compiler, device, si)?)
         }
         Ok(compiled_shaders)
     }
-    fn destroy_shader_modules(
-        device: &mut <I::Backend as Backend>::Device,
-        mut modules: Vec<CompiledShader<I::Backend>>,
-    ) {
+    fn destroy_shader_modules(device: &mut D, mut modules: Vec<CompiledShader<B>>) {
         for module in modules.drain(..) {
             module.destroy(device);
         }
     }
-    fn create_shaders<'a>(dev: &mut <I::Backend as Backend>::Device) -> Result<
-        Vec<CompiledShader<'a, I::Backend>>, &'static str
-    > {
+    fn create_shaders<'a>(dev: &mut D) -> Result<Vec<CompiledShader<'a, B>>, &'static str> {
         Self::compile_shaders(dev, vec![ShaderInfo {
             kind: shaderc::ShaderKind::Vertex,
             name: "basic.vert",
@@ -374,9 +412,7 @@ impl<I: Instance> Renderer<I> {
     }
     fn vertex_attribs() -> Result<Vec<AttributeDesc>, &'static str> {
         let aa = geom::Vertex::attributes();
-        let strides = geom::Vertex::packed_sz();
         let mut curr_loc = 0;
-        let mut curr_binding = 0;
         let mut descs = Vec::new();
         for a in aa.iter() {
             trace!("Converting {:?} to AttributeDesc.", a);
@@ -401,30 +437,20 @@ impl<I: Instance> Renderer<I> {
         // TODO do this smarter
         IndexType::U32
     }
-    fn create_pipeline(
-        device: &mut <I::Backend as Backend>::Device, extent: Extent2D, render_pass: &<<I>::Backend as Backend>::RenderPass,
-    ) -> Result<(
-        Vec<<<I>::Backend as Backend>::DescriptorSetLayout>,
-        <<I>::Backend as Backend>::PipelineLayout,
-        <<I>::Backend as Backend>::GraphicsPipeline,
+    fn create_pipeline(device: &mut D, extent: Extent2D, render_pass: &B::RenderPass) -> Result<(
+        Vec<B::DescriptorSetLayout>, B::PipelineLayout, B::GraphicsPipeline,
     ), &'static str> {
         let compiled_shaders = Self::create_shaders(device)?;
         let shaders = GraphicsShaderSet {
-            vertex: compiled_shaders[0].get_entry(Specialization {
-                constants: &[],
-                data: &[],
-            }),
+            vertex: compiled_shaders[0].get_entry(),
             hull: None,
             domain: None,
             geometry: None,
-            fragment: Some(compiled_shaders[1].get_entry(Specialization {
-                constants: &[],
-                data: &[],
-            })),
+            fragment: Some(compiled_shaders[1].get_entry()),
         };
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: geom::Vertex::packed_sz() as ElemStride,
+            stride: geom::Vertex::packed_byte_sz() as ElemStride,
             rate: 0,
         }];
         let attributes = Self::vertex_attribs()?;
@@ -432,7 +458,7 @@ impl<I: Instance> Renderer<I> {
         let rasterizer = Rasterizer {
             depth_clamping: false,
             polygon_mode: PolygonMode::Fill,
-            cull_face: Face::NONE,
+            cull_face: Face::BACK,
             front_face: FrontFace::Clockwise,
             depth_bias: None,
             conservative: false,
@@ -467,14 +493,10 @@ impl<I: Instance> Renderer<I> {
             blend_color: None,
             depth_bounds: None,
         };
-        let bindings = Vec::<DescriptorSetLayoutBinding>::new();
-        let immutable_samplers = Vec::<<I::Backend as Backend>::Sampler>::new();
-        let descriptor_set_layouts: Vec<<I::Backend as Backend>::DescriptorSetLayout> = vec![unsafe {
-            device.create_descriptor_set_layout(bindings, immutable_samplers)
-                .map_err(|_| "Couldn't make a DescriptorSetLayout")?
-        }];
+        let descriptor_set_layouts = Self::layout_set_descs(device)?;
         let push_constants: Vec<(ShaderStageFlags, std::ops::Range<u32>)> = vec![
-            (ShaderStageFlags::FRAGMENT, 0..4)
+            (ShaderStageFlags::VERTEX, 0..16),
+            (ShaderStageFlags::FRAGMENT, 16..21)
         ];
         let layout = unsafe {
             device.create_pipeline_layout(&descriptor_set_layouts, push_constants)
@@ -571,7 +593,7 @@ impl<I: Instance> Renderer<I> {
             .map_err(|_| "Failed to present into the swapchain!")
         }
     }
-    fn draw_geom<C: Into<[f32; 4]>>(&mut self, m: geom::Model, color: C) -> Result<(), &'static str> {
+    fn draw_geom<C: Into<[f32; 4]>>(&mut self, m: geom::Model, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
         // FRAME PREP
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
@@ -593,10 +615,15 @@ impl<I: Instance> Renderer<I> {
                 .reset_fence(flight_fence)
                 .map_err(|_| "Couldn't reset the fence!")?;
         }
-        // WRITE THE CHANGED DATA
+        // LOAD ALL NEEDED DATA
+        let vert_buffer = {
+            let ref vb = self.alloc_buffers[0];
+            vb.load_data_from_slice(&mut self.device, &m.vv_as_bytes(), 0)?;
+            vb
+        };
         let index_buffer = {
             let mut found_buffer = None;
-            // TODO use a pointer map later
+            // TODO use a pointer map for O(1)ish look up later
             for b in self.loaded_buffers.iter() {
                 if b.matches_source(&m.source) {
                     found_buffer = Some(b);
@@ -604,21 +631,43 @@ impl<I: Instance> Renderer<I> {
                 }
             }
             if let Some(b) = found_buffer { b } else {
-                let ff_bytes = m.ff_as_bytes();
                 self.loaded_buffers.push(LoadedBuffer::new(
                     &self._adapter, &mut self.device,
                     None,
-                    (&**m.source).packed_ff_sz() as u64, buffer::Usage::INDEX,
+                    (&**m.source).ff_byte_cnt() as u64, buffer::Usage::INDEX,
                     &m.ff_as_bytes(), m.source.clone()
                 )?);
                 self.loaded_buffers.last().expect("Loaded buffer that was just pushed does not exist.")
             }
         };
-        let vert_buffer = {
-            self.alloc_buffers[0].load_data_from_slice(&mut self.device, &m.vv_as_bytes(), 0)?;
-            &self.alloc_buffers[0]
-        };
-        // RECORD COMMANDS
+        if let Some(t) = m.source.texture() {
+            // load image
+            let mut load = None;
+            for li in self.loaded_images.iter() {
+                if li.name == *t {
+                    load = Some(li)
+                }
+            }
+            let li = if let Some(l) = load { l } else {
+                self.loaded_images.push(LoadedImage::new(
+                    &self._adapter, &mut self.device, &mut self.command_pool, &mut self.queue_group.queues[0],
+                    img::open(t).expect("Texture broken!").to_rgba(), t.clone(),
+                )?);
+                self.loaded_images.last().expect("Something that was just put into the vector is missing.")
+            };
+            // bind to descriptor set
+            unsafe { self.device.write_descriptor_sets(vec![gfx_hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[img_idx_usize], binding: 0, array_offset: 0,
+                descriptors: Some(gfx_hal::pso::Descriptor::Image(
+                    li.img_view_ref(),
+                    Layout::ShaderReadOnlyOptimal
+                )),
+            }, gfx_hal::pso::DescriptorSetWrite {
+                  set: &self.descriptor_sets[img_idx_usize], binding: 1, array_offset: 0,
+                  descriptors: Some(gfx_hal::pso::Descriptor::Sampler(li.sampler_ref())),
+            }]); }
+        }
+        // RECORD COMMANDS + BIND BUFFERS
         unsafe {
             let buffer = &mut self.command_buffers[img_idx_usize];
             const TRIANGLE_CLEAR: [ClearValue; 1] = [
@@ -633,8 +682,7 @@ impl<I: Instance> Renderer<I> {
                     TRIANGLE_CLEAR.iter(),
                 );
                 encoder.bind_graphics_pipeline(&self.graphics_pipeline);
-                // Here we must force the Deref impl of ManuallyDrop to play nice.
-                let vert_buffer_ref: &<I::Backend as Backend>::Buffer = &vert_buffer.buffer_ref();
+                let vert_buffer_ref: &B::Buffer = &vert_buffer.buffer_ref();
                 let buffers: ArrayVec<[_; 1]> = [(vert_buffer_ref, 0)].into();
                 encoder.bind_vertex_buffers(0, buffers);
                 encoder.bind_index_buffer(buffer::IndexBufferView {
@@ -642,13 +690,25 @@ impl<I: Instance> Renderer<I> {
                     offset: 0,
                     index_type: Self::face_index_type(),
                 });
+                if m.source.has_texture() {
+                    encoder.bind_graphics_descriptor_sets(
+                        &self.pipeline_layout, 0,
+                        Some(&self.descriptor_sets[img_idx_usize]), &[],
+                    );
+                }
                 encoder.push_graphics_constants(
-                    &self.pipeline_layout,
-                    ShaderStageFlags::FRAGMENT,
-                    0,
-                    &Self::as_buffer(&color.into())
+                    &self.pipeline_layout, ShaderStageFlags::VERTEX,
+                    0, &cam.get_vp_mat().as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
                 );
-                encoder.draw_indexed(0..(m.source.packed_ff_sz() as u32), 0, 0..1);
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
+                    16, &Self::as_buffer(&color.into())
+                );
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
+                    20, &[if m.source.has_texture() { 1 } else { 0 }]
+                );
+                encoder.draw_indexed(0..(m.source.ff_flat_cnt() as u32), 0, 0..1);
             }
             buffer.finish();
         }
@@ -679,7 +739,7 @@ impl<I: Instance> Renderer<I> {
     fn handle_req(r: &mut Renderer<I>, q: RenderReq<I>) -> Result<(), &'static str> {
         match q {
             RenderReq::Clear(Color(c)) => r.clear_color(c),
-            RenderReq::Draw(m, Color(c)) => r.draw_geom(m, c),
+            RenderReq::Draw(m, cam, Color(c)) => r.draw_geom(m, cam, c),
             RenderReq::Free(a) => match a.lock() {
                 Ok(mut f) => Result::Ok(f.deref_mut()(r)),
                 Err(_) => Result::Err("I hate when I'm given poisoned cookies."),
@@ -708,6 +768,10 @@ impl <I: Instance> Drop for Renderer<I> {
                 self.device.destroy_semaphore(s)
             }
 
+            self.descriptor_sets.drain(..);
+            // self.descriptor_pool.free_sets(self.descriptor_sets.drain(..)); // implicitly done
+            self.device.destroy_descriptor_pool(ManuallyDrop::into_inner(read(&mut self.descriptor_pool)));
+
             self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&mut self.graphics_pipeline)));
             self.device.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&mut self.pipeline_layout)));
             for dsl in self.descriptor_set_layouts.drain(..) {
@@ -721,10 +785,13 @@ impl <I: Instance> Drop for Renderer<I> {
                 self.device.destroy_image_view(iv)
             }
 
-            for mut b in self.alloc_buffers.drain(..) {
+            for b in self.loaded_images.drain(..) {
                 b.free(&self.device);
             }
-            for mut b in self.loaded_buffers.drain(..) {
+            for b in self.alloc_buffers.drain(..) {
+                b.free(&self.device);
+            }
+            for b in self.loaded_buffers.drain(..) {
                 b.free(&self.device);
             }
 

@@ -5,19 +5,20 @@ use std::{
     sync::{Arc, Mutex, Weak},
     ops::{FnMut, DerefMut},
     result::Result,
+    time::Instant,
 };
 
-pub trait CBFn: FnMut(&State, &V) + Send + 'static {}
-impl <T> CBFn for T where T: FnMut(&State, &V) + Send + 'static {}
+pub trait CBFn: FnMut(&State, &V, &Instant, &Instant) + Send + 'static {}
+impl <T> CBFn for T where T: FnMut(&State, &V, &Instant, &Instant) + Send + 'static {}
 pub struct CB {
     c: C,
     cb: Weak<Mutex<CBFn>>,
 }
 impl CB {
-    fn call(&self, s: &State, v: &V) -> Result<(), ()> {
+    fn call(&self, s: &State, v: &V, l_t: &Instant, c_t: &Instant) -> Result<(), ()> {
         match self.cb.upgrade() {
             Some(cb_m) => match cb_m.lock() {
-                Ok(mut cb_mg) => Result::Ok((cb_mg.deref_mut())(s, v)),
+                Ok(mut cb_mg) => Result::Ok((cb_mg.deref_mut())(s, v, l_t, c_t)),
                 Err(_) => Result::Ok(()),
             },
             None => Result::Err(()),
@@ -39,25 +40,27 @@ pub struct Manager {
     occupied: Vec<C>,
     // TODO potentially change Vec into a linked list for O(1) removal
     buckets: HashMap<C, Vec<Arc<Mutex<CB>>>>,
+    last_inst: Instant,
 }
 impl Manager {
     pub fn new() -> Manager {
         Manager {
             occupied: vec![],
             buckets: HashMap::new(),
+            last_inst: Instant::now(),
         }
     }
-    fn fire_event(s: &State, v: &V, cb_m: &Arc<Mutex<CB>>) -> Result<(), ()> {
+    fn fire_event(s: &State, v: &V, cb_m: &Arc<Mutex<CB>>, last_inst: &Instant, curr_inst: &Instant) -> Result<(), ()> {
         match cb_m.lock() {
-            Ok(cb_mg) => (*cb_mg).call(s, v),
+            Ok(cb_mg) => (*cb_mg).call(s, v, last_inst, curr_inst),
             Err(_) => Result::Ok(()),
         }
     }
-    fn fire_category_events(&self, s: &State, c: &C, v: &V) -> (C, Vec<Arc<Mutex<CB>>>) {
+    fn fire_category_events(&self, s: &State, c: &C, v: &V, curr_inst: &Instant) -> (C, Vec<Arc<Mutex<CB>>>) {
         let mut to_remove = vec![];
         if let Some(bucket) = self.buckets.get(&c) {
             for cb in bucket.iter() {
-                match Manager::fire_event(s, v, cb) {
+                match Manager::fire_event(s, v, cb, &self.last_inst, curr_inst) {
                     Ok(_) => (),
                     Err(_) => to_remove.push(cb.clone()),
                 }
@@ -65,10 +68,10 @@ impl Manager {
         }
         (c.clone(), to_remove)
     }
-    fn fire_all_events(&mut self, s: &State) -> Vec<(C, Vec<Arc<Mutex<CB>>>)> {
+    fn fire_all_events(&mut self, s: &State, curr_inst: &Instant) -> Vec<(C, Vec<Arc<Mutex<CB>>>)> {
         let mut removal_stuff = Vec::with_capacity(self.occupied.len());
         for category in self.occupied.iter() {
-            removal_stuff.push(self.fire_category_events(s, category, &s.get(&category)));
+            removal_stuff.push(self.fire_category_events(s, category, &s.get(&category), curr_inst));
         };
         removal_stuff
     }
@@ -102,6 +105,7 @@ impl Manager {
         self.remove_matching(vec![(c, vec![cb_m.clone()])]);
     }
     pub fn fire_and_clean_listing(&mut self, s: &State, vv: &mut Vec<V>) {
+        let curr_inst = Instant::now();
         let mut deallocs = Vec::new();
         let mut dealloc_idx = HashMap::new();
         for v in vv.iter() {
@@ -109,7 +113,7 @@ impl Manager {
                 V::Ignored => (),
                 _ => {
                     let c = C::from(v.clone());
-                    let (c, mut rr) = self.fire_category_events(s, &c, &v);
+                    let (c, mut rr) = self.fire_category_events(s, &c, &v, &curr_inst);
                     if !rr.is_empty() {
                         let idx = dealloc_idx.entry(c.clone()).or_insert_with(|| {
                             deallocs.push((c, Vec::with_capacity(1)));
@@ -121,10 +125,13 @@ impl Manager {
             }
         }
         self.remove_matching(deallocs);
+        self.last_inst = curr_inst;
     }
     pub fn fire_and_clean_all(&mut self, s: &State) {
-        let rems = self.fire_all_events(s);
+        let curr_inst = Instant::now();
+        let rems = self.fire_all_events(s, &curr_inst);
         self.remove_matching(rems);
+        self.last_inst = curr_inst;
     }
     pub fn handle_req(&mut self, req: RegRequest) -> RegResponse {
         match req {

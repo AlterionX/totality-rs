@@ -1,5 +1,3 @@
-extern crate image as img;
-
 use super::{
     hal::{
         Backend, Device, Adapter, PhysicalDevice,
@@ -13,18 +11,19 @@ use super::{
         pso::PipelineStage,
         command::BufferImageCopy,
     },
+    img,
     buffers::AllocatedBuffer,
 };
 use std::{
     mem::{ManuallyDrop, size_of},
     marker::PhantomData,
-    sync::Arc,
 };
 
 #[allow(dead_code)]
 use log::{error, warn, info, debug, trace};
 
 pub struct LoadedImage<B: Backend> {
+    pub name: String,
     image: ManuallyDrop<B::Image>,
     requirements: Requirements,
     memory: ManuallyDrop<B::Memory>,
@@ -36,6 +35,7 @@ impl <B: Backend> LoadedImage<B> {
     pub fn new<C: Capability + Supports<Transfer>>(
         adapter: &Adapter<B>, device: &mut B::Device, command_pool: &mut CommandPool<B, C>,
         command_queue: &mut CommandQueue<B, C>, img: img::RgbaImage,
+        name: String
     ) -> Result<Self, &'static str> {
         unsafe {
             // 0. First we compute some memory related values.
@@ -182,6 +182,7 @@ impl <B: Backend> LoadedImage<B> {
             staging_buffer.free(device);
             command_pool.free(Some(cmd_buffer));
             Ok(LoadedImage {
+                name: name,
                 image: ManuallyDrop::new(the_image),
                 requirements: requirements,
                 memory: ManuallyDrop::new(memory),
@@ -191,7 +192,9 @@ impl <B: Backend> LoadedImage<B> {
             })
         }
     }
-    pub unsafe fn manually_drop(&self, device: &B::Device) {
+    pub fn img_view_ref(&self) -> &B::ImageView { &self.image_view }
+    pub fn sampler_ref(&self) -> &B::Sampler { &self.sampler }
+    pub unsafe fn free(&self, device: &B::Device) {
         use core::ptr::read;
         device.destroy_sampler(ManuallyDrop::into_inner(read(&self.sampler)));
         device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));

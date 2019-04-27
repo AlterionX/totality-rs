@@ -76,7 +76,7 @@ impl <B: Backend> AllocatedBuffer<B> {
         });
         Ok(())
     }
-    pub fn free(&mut self, dev: &<B>::Device) {
+    pub fn free(mut self, dev: &<B>::Device) {
         if !self.dropped { unsafe {
             use std::ptr::read;
             dev.destroy_buffer(ManuallyDrop::into_inner(read(&mut self.buf)));
@@ -109,6 +109,7 @@ impl <T, B: Backend> LoadedBuffer<T, B> {
         sz: u64, usage: Usage,
         data: &[u32], source: Arc<T>,
     ) -> Result<Self, &'static str> {
+        trace!("Requested creation of LoadedBuffer with capacity {:?}.", sz);
         let ab = AllocatedBuffer::new(adapter, dev, name, sz, usage)?;
         ab.load_data_from_slice(dev, data, 0)?;
         Ok(LoadedBuffer {
@@ -116,13 +117,10 @@ impl <T, B: Backend> LoadedBuffer<T, B> {
             buffer: ab,
         })
     }
-    pub fn free(&mut self, dev: &<B>::Device) {
+    pub fn free(mut self, dev: &<B>::Device) {
         self.source.take();
         self.buffer.free(dev)
     }
-// TODO figure out fn to load data into buffer
-//     pub fn new_with_custom_load<F: FnOnce()>() {
-//     }
     pub fn buffer_ref(&self) -> &<B>::Buffer { self.buffer.buffer_ref() }
     pub fn matches_source(&self, check: &Arc<T>) -> bool {
         if let Some(ref a) = self.source {
