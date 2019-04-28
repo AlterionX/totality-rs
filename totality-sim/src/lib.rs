@@ -25,10 +25,11 @@ struct Simulation {
 unsafe impl Send for Simulation {}
 impl Simulation {
     fn dur_as_f64(d: &Duration) -> f64 {
-        (d.as_secs() as f64) + (d.subsec_nanos() as f64) / 1_000_000f64
+        (d.as_secs() as f64) + (d.subsec_nanos() as f64) / 1_000_000_000f64
     }
     pub fn step(&mut self) {
         let step = Self::dur_as_f64(&self.time_step) as f32;
+        info!("Step: {:?}", step);
         // call pre
         // simulate
         let opt = if let Ok(mut k) = self.scene.read() {
@@ -45,6 +46,7 @@ impl Simulation {
                         r_ele.vel,
                         r_ele.ori * UnitQuaternion::identity().nlerp(&r_ele.omg, step),
                         r_ele.omg,
+                        r_ele.scale,
                     );
                 };
             };

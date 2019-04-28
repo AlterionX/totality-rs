@@ -112,9 +112,12 @@ impl State {
             )
         }) as Box<geom::Geom>);
         info!("Constructed Triangle!");
+        let mut box_model = geom::Model::from_geom(c_tri1.clone());
+        box_model.set_omg(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), 1.0));
+        box_model.set_scale(0.5);
         let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
             vec![c_tri0.clone(), c_tri1.clone()],
-            vec![geom::Model::from_geom(c_tri0.clone()), geom::Model::from_geom(c_tri1.clone())]
+            vec![geom::Model::from_geom(c_tri0.clone()), box_model]
         ))));
         let renderer = Option::Some(TypedRenderStage::create(sc.clone(), sm.win.clone()));
         // set up shutdown flow

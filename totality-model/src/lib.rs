@@ -14,7 +14,7 @@ use na::{
     Vector3,
     UnitQuaternion, Point3,
     Rotation3, Isometry3, Translation3,
-    Matrix,
+    Matrix, Matrix4,
     VecStorage,
 };
 #[allow(dead_code)]
@@ -71,6 +71,7 @@ pub struct Model {
     pub vel: Vector3<f32>,
     pub ori: UnitQuaternion<f32>,
     pub omg: UnitQuaternion<f32>,
+    pub scale: f32,
     pub source: Arc<Box<Geom>>,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
@@ -82,17 +83,19 @@ impl Model {
             vel: Vector3::zeros(),
             ori: UnitQuaternion::identity(),
             omg: UnitQuaternion::identity(),
+            scale: 1.,
             source: g.clone(),
             children: Option::None,
             parent: Option::None
         }
     }
 
-    pub fn set_state(&mut self, p: Vector3<f32>, v: Vector3<f32>, o: UnitQuaternion<f32>, omg: UnitQuaternion<f32>) {
+    pub fn set_state(&mut self, p: Vector3<f32>, v: Vector3<f32>, o: UnitQuaternion<f32>, omg: UnitQuaternion<f32>, scale: f32) {
         self.set_pos(p);
         self.set_vel(v);
         self.set_ori(o);
         self.set_omg(omg);
+        self.set_scale(scale);
     }
     pub fn set_pos(&mut self, p: Vector3<f32>) {
         self.pos = p;
@@ -106,7 +109,17 @@ impl Model {
     pub fn set_omg(&mut self, o: UnitQuaternion<f32>) {
         self.omg = o;
     }
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
+    }
 
+     pub fn mat(&self) -> Matrix4<f32> {
+         let inv_s = 1. / self.scale;
+         let mut rot = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[inv_s, inv_s, inv_s, 1.0]);
+         rot.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
+         if !rot.try_inverse_mut() { panic!("Could not invert view matrix!"); }
+         rot
+     }
     pub fn flat_v(&self) -> Vec<f32> {
         self.source.flattened_verts_as_floats()
     }

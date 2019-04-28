@@ -73,7 +73,9 @@ macro_rules! create_duration_kt {
                         },
                     };
                     let busy_time = Instant::now() - curr_start_time;
-                    std::thread::sleep(target - busy_time);
+                    if target > busy_time {
+                        std::thread::sleep(target - busy_time);
+                    }
                     let total_time = Instant::now() - curr_start_time;
                     trace!("{} thread spent {:?} busy and {:?} total in loop.", $name, busy_time, total_time);
                 }
@@ -118,7 +120,9 @@ macro_rules! create_rated_kt {
                         },
                     };
                     let busy_time = Instant::now() - curr_start_time;
-                    std::thread::sleep(target - busy_time);
+                    if target > busy_time {
+                        std::thread::sleep(target - busy_time);
+                    }
                     let total_time = Instant::now() - curr_start_time;
                     trace!("{} thread spent {:?} busy and {:?} total in loop.", $name, busy_time, total_time);
                 }

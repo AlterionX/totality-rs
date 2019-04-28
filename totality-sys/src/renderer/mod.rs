@@ -8,6 +8,7 @@
     )),
     allow(dead_code, unused_extern_crates, unused_imports)
 )]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(feature = "dx11")]
 extern crate gfx_backend_dx11 as back;
@@ -696,9 +697,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                         Some(&self.descriptor_sets[img_idx_usize]), &[],
                     );
                 }
+                let mvp = cam.get_vp_mat() * m.mat();
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::VERTEX,
-                    0, &cam.get_vp_mat().as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
+                    0, &mvp.as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
