@@ -8,3 +8,4 @@ edition = "2018"
 totality-threading = { path = "../totality-threading" }
 totality-model = { path = "../totality-model" }
 log = "0.4.0"
+nalgebra = "0.18"

@@ -1,6 +1,9 @@
-use std::{sync::Arc, mem::size_of};
+use std::{sync::{Arc, RwLock, Mutex}, mem::size_of};
 use super::{Geom, Vertex, VMat, FMat, Model, Face};
 use na::{Matrix3, Vector3, Matrix, U2, U3};
+
+#[allow(dead_code)]
+use log::{trace, debug, info, warn, error};
 
 pub struct Static {
     pub objs: Vec<Arc<Box<Geom>>>,
@@ -9,16 +12,56 @@ pub struct Dynamic {
     pub mm: Vec<Model>,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct TripleBufferIdx {
+    snatched: usize,
+    most_recent: usize,
+    curr_write: usize,
+    next_write: usize,
+}
+
 pub struct Scene {
-    pub statics: Static,
-    pub dynamics: Dynamic,
+    pub statics: Arc<Static>,
+    pub dynamics: [Arc<RwLock<Dynamic>>; 3],
+    indices: Mutex<TripleBufferIdx>,
 }
 impl Scene {
     pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> Scene {
         Scene {
-            statics: Static { objs: gg },
-            dynamics: Dynamic { mm: mm },
+            statics: Arc::new(Static { objs: gg }),
+            dynamics: [
+                Arc::new(RwLock::new(Dynamic { mm: mm.clone() })),
+                Arc::new(RwLock::new(Dynamic { mm: mm.clone() })),
+                Arc::new(RwLock::new(Dynamic { mm: mm.clone() })),
+            ],
+            indices: Mutex::new(TripleBufferIdx {
+                snatched: 0usize,
+                most_recent: 0usize,
+                curr_write: 1usize,
+                next_write: 2usize,
+            }),
         }
+    }
+    pub fn snatch(&self) -> Arc<RwLock<Dynamic>> {
+        if let Ok(mut indices) = self.indices.lock() {
+            info!("Snatching indices: {:?}.", indices);
+            if indices.snatched != indices.most_recent {
+                indices.next_write = indices.snatched;
+                indices.snatched = indices.most_recent;
+            }
+            info!("Reached indices: {:?}.", indices);
+            self.dynamics[indices.snatched].clone()
+        } else { panic!("Poisoned buffer indices!") }
+    }
+    pub fn advance(&self) -> (Arc<RwLock<Dynamic>>, Arc<RwLock<Dynamic>>) {
+        if let Ok(mut indices) = self.indices.lock() {
+            info!("Advancing indices: {:?}.", indices);
+            indices.most_recent = indices.curr_write;
+            indices.curr_write = indices.next_write;
+            indices.next_write = indices.most_recent;
+            info!("Reached indices: {:?}.", indices);
+            (self.dynamics[indices.most_recent].clone(), self.dynamics[indices.curr_write].clone())
+        } else { panic!("Poisoned buffer indices!") }
     }
 }
 

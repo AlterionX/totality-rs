@@ -67,10 +67,10 @@ pub trait Geom: Send + Sync {
 // TODO should this be a trait?
 #[derive(Clone)]
 pub struct Model {
-    pos: Vector3<f32>,
-    vel: Vector3<f32>,
-    ori: UnitQuaternion<f32>,
-    omg: UnitQuaternion<f32>,
+    pub pos: Vector3<f32>,
+    pub vel: Vector3<f32>,
+    pub ori: UnitQuaternion<f32>,
+    pub omg: UnitQuaternion<f32>,
     pub source: Arc<Box<Geom>>,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,

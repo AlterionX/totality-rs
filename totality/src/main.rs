@@ -5,6 +5,7 @@ extern crate simple_logger;
 extern crate log;
 extern crate arrayvec as av;
 extern crate totality_sys as sys;
+extern crate totality_sim as sim;
 extern crate totality_threading as th;
 extern crate totality_model as geom;
 
@@ -48,10 +49,11 @@ impl Config {
 enum Action { Continue, Exit, }
 
 struct State {
-    sc: Arc<Option<RwLock<Scene>>>,
+    sc: Arc<RwLock<Option<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
     rs: Option<TypedRenderStage>,
     sys: Option<io::Manager>, // TODO check mutability constraints
+    sim: Option<sim::SimulationManager>,
     c: Config,
     // shutdown flow
     shutdown: Arc<Mutex<io::cb::CBFn>>,
@@ -110,7 +112,7 @@ impl State {
             )
         }) as Box<geom::Geom>);
         info!("Constructed Triangle!");
-        let sc = Arc::new(Some(RwLock::new(geom::scene::Scene::new(
+        let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
             vec![c_tri0.clone(), c_tri1.clone()],
             vec![geom::Model::from_geom(c_tri0.clone()), geom::Model::from_geom(c_tri1.clone())]
         ))));
@@ -123,7 +125,7 @@ impl State {
         };
         sm.reg_imm(b::C::F(b::Flag::Close).into(), cb_shutdown.clone());
         sm.reg_imm(b::C::S(b::Key::Esc).into(), cb_shutdown.clone());
-        let c_fish = Arc::new(Mutex::new(0));
+        let c_fish = Arc::new(Mutex::new(1));
         let cb_change_fish = {
             let c_fish = c_fish.clone();
             cb_arc!("Fish Toggle", v, s, {
@@ -159,7 +161,6 @@ impl State {
             })
         };
         sm.reg_per(io::e::p::C::CursorPos.into(), cb_color.clone());
-        let cam = Arc::new(Mutex::new(geom::camera::Camera::Orthographic(geom::camera::OrthoCamera::default())));
         let cam = Arc::new(Mutex::new(geom::camera::Camera::Perspective(geom::camera::PerspectiveCamera::default())));
         let cb_mover = {
             let cam = cam.clone();
@@ -210,17 +211,20 @@ impl State {
         if let Ok(mut cam) = cam.lock() {
             (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), std::f32::consts::FRAC_PI_4));
             (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), std::f32::consts::FRAC_PI_4));
-            // (*cam).trans_cam_space(na::Vector3::new(0., 0., 1.));
+            (*cam).trans_cam_space(na::Vector3::new(0., 0., 1.));
             if let geom::camera::Camera::Perspective(mut p) = *cam {
                 info!("Camers: {:?}", p);
             }
         }
         // sm.reg_per(b::C::A('n').into(), cb_rotor.clone());
         info!("Finished initial setup.");
+        let sim_step = Duration::from_secs(1).checked_div(120).expect("Shouldn't be anything wrong here.");
+        let sim = Some(sim::SimulationManager::new(sim_step, sc.clone(), vec![], vec![]).expect("Could not create Simulation!"));
         State {
             sc: sc,
             rs: renderer,
             sys: Option::Some(sm),
+            sim: sim,
             c: cfg,
             // shutdown flow
             shutdown: cb_shutdown,
@@ -248,19 +252,22 @@ impl State {
         let fish_id = self.fish.lock().expect("Seriously?");
         let cam_clone = (*if let Ok(ref cam) = self.camera.lock() { cam } else { panic!("Camera poisoned!") }).clone();
         let rs_ref = if let Some(ref rs) = self.rs { rs } else { return Action::Continue; };
-        if let Some(ref sc_lk) = *self.sc {
-            let model_clone = if let Ok(sc) = sc_lk.read() {
-                sc.dynamics.mm[*fish_id as usize].clone()
+        if let Ok(ref sc_g) = self.sc.read() {
+            let dyns = if let Some(ref sc) = **sc_g {
+                sc.snatch()
             } else { panic!("The scene mutex is poisoned.") };
-            rs_ref.send_cmd(RenderReq::Draw(
-                model_clone, cam_clone,
-                Color(na::Vector4::new(
-                        original_color[0] as f32,
-                        original_color[1] as f32,
-                        original_color[2] as f32,
-                        original_color[3] as f32,
-                ))
-            )).expect("No problems expected.");
+            if let Ok(mm_g) = dyns.read() {
+                let model_clone = mm_g.mm[*fish_id as usize].clone();
+                rs_ref.send_cmd(RenderReq::Draw(
+                    model_clone, cam_clone,
+                    Color(na::Vector4::new(
+                            original_color[0] as f32,
+                            original_color[1] as f32,
+                            original_color[2] as f32,
+                            original_color[3] as f32,
+                    ))
+                )).expect("No problems expected.");
+            };
         }
         // Every <variable> invocations
         // TODO run cold logic
@@ -268,14 +275,17 @@ impl State {
         // TODO query system state
         (*self.current_action.lock().unwrap()).clone()
     }
-    fn cleanup(mut self) -> (Option<sys::io::FinishResult>, Option<sys::renderer::FinishResult>) {
+    fn cleanup(mut self) -> (sys::io::FinishResult, sys::renderer::FinishResult, sim::FinishResult) {
         // TODO change to let chaining once available
         ({
             info!("Shutting down system management.");
-            self.sys.take().map(|s| s.finish())
+            self.sys.take().map_or_else(|| Option::None, |s| s.finish())
         }, {
             info!("Shutting down rendering systems.");
-            self.rs.take().map(|r| r.finish())
+            self.rs.take().map_or_else(|| Option::None, |r| r.finish())
+        },{
+            info!("Shutting down simulation systems.");
+            self.sim.take().map_or_else(|| Option::None, |s| s.finish())
         })
     }
 }
