@@ -17,9 +17,9 @@ macro_rules! cb_arc {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
                 move |$s: &$crate::io::e::State, $v: &$crate::io::e::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
-                    trace!("{:?} update fired with {:?}", $name, $v);
+                    trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
-                    trace!("{:?} handler completed.", $name);
+                    trace!("{} handler completed.", $name);
                 }
             ));
             arc
@@ -30,9 +30,9 @@ macro_rules! cb_arc {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
                 move |$s: &$crate::io::e::State, $v: &$crate::io::e::V, _: &std::time::Instant, _: &std::time::Instant| {
-                    trace!("{:?} update fired with {:?}", $name, $v);
+                    trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
-                    trace!("{:?} handler completed.", $name);
+                    trace!("{} handler completed.", $name);
                 }
             ));
             arc
@@ -43,9 +43,9 @@ macro_rules! cb_arc {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
                 move |$s: &$crate::io::e::State, v: &$crate::io::e::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
-                    trace!("{:?} update fired with {:?}", $name, v);
+                    trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
-                    trace!("{:?} handler completed.", $name);
+                    trace!("{} handler completed.", $name);
                 }
             ));
             arc
@@ -56,9 +56,9 @@ macro_rules! cb_arc {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
                 move |_: &$crate::io::e::State, v: &$crate::io::e::V, _: &std::time::Instant, _: &std::time::Instant| {
-                    trace!("{:?} update fired with {:?}", $name, v);
+                    trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
-                    trace!("{:?} handler completed.", $name);
+                    trace!("{} handler completed.", $name);
                 }
             ));
             arc

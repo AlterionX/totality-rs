@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant}
 };
 
-use na::{Matrix, Matrix3, U2, U3, Dynamic};
+use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
 use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{IT, Color, TypedRenderReq, RenderReq, TypedRenderStage}};
 #[allow(dead_code)]
@@ -48,7 +48,7 @@ impl Config {
 enum Action { Continue, Exit, }
 
 struct State {
-    sc: Arc<RwLock<Option<Scene>>>,
+    sc: Arc<Option<RwLock<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
     rs: Option<TypedRenderStage>,
     sys: Option<io::Manager>, // TODO check mutability constraints
@@ -59,10 +59,6 @@ struct State {
     // color flow
     color: Arc<Mutex<na::Vector4<f32>>>,
     color_changer: Arc<Mutex<io::cb::CBFn>>,
-    // color flow
-    tri0_m: Arc<Mutex<Model>>,
-    tri1_m: Arc<Mutex<Model>>,
-    tri_m_changer: Arc<Mutex<io::cb::CBFn>>,
     // fish selection
     fish: Arc<Mutex<i32>>,
     change_fish: Arc<Mutex<io::cb::CBFn>>,
@@ -76,30 +72,47 @@ impl State {
         let mut sm = io::Manager::new();
         let c_tri0 = Arc::new(Box::new(geom::scene::TriGeom::new(
              na::Matrix3::new(
-                 0.5,  0.5,  0f32,
-                -0.5,  0.5,  0f32,
-                 0f32, 0f32, 0f32,
+                 0.5,  0.5,  -1f32,
+                -0.5,  0.5,  -1f32,
+                 0f32, 0f32, -1f32,
             ),
-            na::Vector3::new(0u32, 1, 2),
+            na::Vector3::new(2u32, 1, 0),
             vec![[0f32, 0f32], [1f32, 0f32], [0f32, 1f32]],
             Some("totality/res/thomas-veyrat-anglerfish-view01-3-4.jpg".to_string()),
         )) as Box<geom::Geom>);
         let c_tri1 = Arc::new(Box::new({
             geom::scene::TriMeshGeom::new(
-                geom::VMat::from_iterator(3, vec![
-                    -0.5, -0.5,  0f32,
-                    -0.5,  0.5,  0f32,
-                     0f32, 0f32, 0f32,
+                geom::VMat::from_iterator(8, vec![
+                    -0.5, -0.5, -0.5,
+                    -0.5, -0.5,  0.5,
+                    -0.5,  0.5, -0.5,
+                    -0.5,  0.5,  0.5,
+                     0.5, -0.5, -0.5,
+                     0.5, -0.5,  0.5,
+                     0.5,  0.5, -0.5,
+                     0.5,  0.5,  0.5,
                 ].into_iter()),
-                geom::FMat::from_iterator(1, vec![2u32, 1, 0u32].into_iter()),
-                vec![[0f32, 0f32], [1f32, 0f32], [0f32, 1f32]],
+                geom::FMat::from_iterator(12, vec![
+                    1, 4, 0, 5, 4, 1, // bottom
+                    6, 3, 2, 7, 3, 6, // top
+                    0, 2, 1, 3, 1, 2, // left
+                    4, 7, 6, 5, 7, 4, // right
+                    0, 6, 2, 6, 0, 4, // back
+                    5, 3, 7, 3, 5, 1, // front
+                ].into_iter()),
+                vec![
+                    [0f32, 0f32], [1f32, 0f32],
+                    [0f32, 1f32], [1f32, 1f32],
+                    [0f32, 1f32], [1f32, 1f32],
+                    [0f32, 0f32], [1f32, 0f32],
+                ],
                 Some("totality/res/53cb029b057a2dc4c753969a3ce83ff4.jpg".to_string()),
             )
         }) as Box<geom::Geom>);
         info!("Constructed Triangle!");
-        let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
-            vec![c_tri0.clone()],
-            vec![geom::Model::from_geom(c_tri0.clone())]
+        let sc = Arc::new(Some(RwLock::new(geom::scene::Scene::new(
+            vec![c_tri0.clone(), c_tri1.clone()],
+            vec![geom::Model::from_geom(c_tri0.clone()), geom::Model::from_geom(c_tri1.clone())]
         ))));
         let renderer = Option::Some(TypedRenderStage::create(sc.clone(), sm.win.clone()));
         // set up shutdown flow
@@ -146,46 +159,11 @@ impl State {
             })
         };
         sm.reg_per(io::e::p::C::CursorPos.into(), cb_color.clone());
-        let c_tri0_m = Arc::new(Mutex::new(geom::Model::from_geom(c_tri0.clone())));
-        let c_tri1_m = Arc::new(Mutex::new(geom::Model::from_geom(c_tri1.clone())));
-        let cb_tri_m = {
-            let c_tri0_m = c_tri0_m.clone();
-            let c_tri1_m = c_tri1_m.clone();
-            cb_arc!("TriPos", v, s, {
-                let c = C::P(p::C::ScreenSz);
-                if let V::P(p::V::CursorPos(p::PosState(p))) = v {
-                    let e = s.get(&c);
-                    if let V::P(p::V::ScreenSz(p::SzState(sz))) = e {
-                        let div = p.component_div(&sz);
-                        let mut p = na::Vector3::new(div[0], div[1], 0f32);
-                        p *= 2f32;
-                        p -= na::Vector3::new(1f32, 1f32, 0f32);
-                        trace!("Current screen size: {:?}, Current cursor position: {:?}", sz, v);
-                        if let Ok(mut tri0_m) = c_tri0_m.lock() {
-                            (*tri0_m).set_off_v(&p);
-                            trace!("Triangle position changed to: {:?}", v);
-                        } else {
-                            panic!("Mutex was poisoned! Can we really recover from this?");
-                        }
-                        if let Ok(mut tri1_m) = c_tri1_m.lock() {
-                            (*tri1_m).set_off_v(&p);
-                            trace!("Triangle position changed to: {:?}", v);
-                        } else {
-                            panic!("Mutex was poisoned! Can we really recover from this?");
-                        }
-                    } else {
-                        panic!("The library is wrong. It gave me {:?} when requesting for {:?}.", e, c);
-                    }
-                } else {
-                    panic!("I received an event I never signed up for....");
-                }
-            })
-        };
-        sm.reg_per(io::e::p::C::CursorPos.into(), cb_tri_m.clone());
+        let cam = Arc::new(Mutex::new(geom::camera::Camera::Orthographic(geom::camera::OrthoCamera::default())));
         let cam = Arc::new(Mutex::new(geom::camera::Camera::Perspective(geom::camera::PerspectiveCamera::default())));
         let cb_mover = {
             let cam = cam.clone();
-            const MOVE_SPEED: f32 = 0.1;
+            const MOVE_SPEED: f32 = 1.;
             cb_arc!("Mover", v, s, l_t, c_t, {
                 let duration_held = *c_t - *l_t;
                 trace!("Mover run on value: {:?}", v);
@@ -195,9 +173,9 @@ impl State {
                         match c {
                             'w' | 'a' | 's' | 'd' | 'q' | 'e' => {
                                 (*cam).trans_cam_space(MOVE_SPEED * time_held * match c {
-                                    'w' => na::Vector3::new(0., 0., 1.),
+                                    'w' => na::Vector3::new(0., 0., -1.),
                                     'a' => na::Vector3::new(-1., 0., 0.),
-                                    's' => na::Vector3::new(0., 0., -1.),
+                                    's' => na::Vector3::new(0., 0., 1.),
                                     'd' => na::Vector3::new(1., 0., 0.),
                                     'q' => na::Vector3::new(0., 1., 0.),
                                     'e' => na::Vector3::new(0., -1., 0.),
@@ -217,6 +195,27 @@ impl State {
         sm.reg_per(b::C::A('d').into(), cb_mover.clone());
         sm.reg_per(b::C::A('q').into(), cb_mover.clone());
         sm.reg_per(b::C::A('e').into(), cb_mover.clone());
+        let cb_rotor = {
+            let cam = cam.clone();
+            const ROT_SPEED: f32 = -1.0;
+            cb_arc!("Rotor", v, s, l_t, c_t, {
+                let duration_held = *c_t - *l_t;
+                trace!("Rotor run.");
+                let time_held = (duration_held.as_secs() as f64 + (duration_held.subsec_nanos() as f64 / 1_000_000_000f64)) as f32;
+                if let Ok(mut cam) = cam.lock() {
+                    (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), ROT_SPEED * time_held));
+                }
+            })
+        };
+        if let Ok(mut cam) = cam.lock() {
+            (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), std::f32::consts::FRAC_PI_4));
+            (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), std::f32::consts::FRAC_PI_4));
+            // (*cam).trans_cam_space(na::Vector3::new(0., 0., 1.));
+            if let geom::camera::Camera::Perspective(mut p) = *cam {
+                info!("Camers: {:?}", p);
+            }
+        }
+        // sm.reg_per(b::C::A('n').into(), cb_rotor.clone());
         info!("Finished initial setup.");
         State {
             sc: sc,
@@ -229,17 +228,13 @@ impl State {
             // color flow
             color: c_color,
             color_changer: cb_color,
-            // tri pos
-            tri0_m: c_tri0_m,
-            tri1_m: c_tri1_m,
-            tri_m_changer: cb_tri_m,
             // fish selection
             fish: c_fish,
             change_fish: cb_change_fish,
             // camera
             camera: cam,
             camera_mover: cb_mover,
-            camera_roter: cb_arc!("Rotor", {}),
+            camera_roter: cb_rotor,
         }
     }
     fn step(&mut self, delta: Duration) -> Action {
@@ -253,16 +248,20 @@ impl State {
         let fish_id = self.fish.lock().expect("Seriously?");
         let cam_clone = (*if let Ok(ref cam) = self.camera.lock() { cam } else { panic!("Camera poisoned!") }).clone();
         let rs_ref = if let Some(ref rs) = self.rs { rs } else { return Action::Continue; };
-        let model_clone = (*if *fish_id == 1 { &self.tri0_m } else { &self.tri1_m }.lock().expect("The mutex for the triangle is poisoned.")).clone();
-        rs_ref.send_cmd(RenderReq::Draw(
-            model_clone, cam_clone,
-            Color(na::Vector4::new(
-                    original_color[0] as f32,
-                    original_color[1] as f32,
-                    original_color[2] as f32,
-                    original_color[3] as f32,
-            ))
-        )).expect("No problems expected.");
+        if let Some(ref sc_lk) = *self.sc {
+            let model_clone = if let Ok(sc) = sc_lk.read() {
+                sc.dynamics.mm[*fish_id as usize].clone()
+            } else { panic!("The scene mutex is poisoned.") };
+            rs_ref.send_cmd(RenderReq::Draw(
+                model_clone, cam_clone,
+                Color(na::Vector4::new(
+                        original_color[0] as f32,
+                        original_color[1] as f32,
+                        original_color[2] as f32,
+                        original_color[3] as f32,
+                ))
+            )).expect("No problems expected.");
+        }
         // Every <variable> invocations
         // TODO run cold logic
         // possibly do above 2 steps in lock step

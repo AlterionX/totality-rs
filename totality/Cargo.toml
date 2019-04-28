@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 totality-sys = { path = "../totality-sys" }
+totality-sim = { path = "../totality-sim" }
 totality-threading = { path = "../totality-threading" }
 totality-model = { path = "../totality-model" }
 gfx-hal = "0.1.0"

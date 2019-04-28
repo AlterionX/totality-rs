@@ -1,8 +1,9 @@
 [workspace]
 members = [
     "totality",             # manages everything inbetween
+    "totality-gui",         # gui library compatible with plane rendering
     "totality-sys",         # io + render
-    "totality-physics",     # physics sim
+    "totality-sim",         # physics sim + arbitrary sim
     "totality-model",       # loader + combiner for data models for io, render, and physics
     "totality-threading",   # threading
     # "totality-math",        # simple maths for when nalgebra is just too goddamn fucking bitchy about things

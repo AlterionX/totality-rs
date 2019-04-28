@@ -1,4 +1,6 @@
-use na::{UnitQuaternion, Vector3, Matrix4, U1, U3, U4};
+use na::{UnitQuaternion, Vector3, Vector4, Matrix4, U1, U3, U4};
+#[allow(dead_code)]
+use log::{trace, debug, info, warn, error};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Camera {
@@ -36,6 +38,14 @@ impl Camera {
             }
         }
     }
+    pub fn rot_cam_space(&mut self, v: UnitQuaternion<f32>) {
+        match self {
+            Camera::Perspective(cam) => {
+                cam.rot_cam_space(v)
+            },
+            Camera::Orthographic(_) => {}
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -52,6 +62,7 @@ impl OrthoCamera {
     fn calc_p_mat(&mut self) { self._p_cache.fill_with_identity() }
     fn calc_v_mat(&mut self) {
         self._v_cache.fill_with_identity();
+        self._v_cache[(2, 2)] = -1.;
         self._v_cache.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&(self.position * -1.0));
     }
     pub fn trans(&mut self, shift: Vector3<f32>) {
@@ -91,23 +102,27 @@ pub struct PerspectiveCamera {
 impl PerspectiveCamera {
     pub fn v_mat(&self) -> Matrix4<f32> { self._v_cache }
     pub fn p_mat(&self) -> Matrix4<f32> { self._p_cache }
-    pub fn vp_mat(&self) -> Matrix4<f32> { self.v_mat() * self.p_mat() }
+    pub fn vp_mat(&self) -> Matrix4<f32> { self.p_mat() * self.v_mat() }
     fn calc_p_mat(&mut self) {
-        let cot = 1.0 / (self.fov / 2.0).tan();
-        let inv_depth = 1.0 / (self.far_plane_dist - self.near_plane_dist);
+        let n = self.near_plane_dist;
+        let f = self.far_plane_dist;
+        let f_d = f / (n - f);
+        let a = self.aspect;
+        let cot = 1. / (self.fov * 0.5).tan();
         self._p_cache = Matrix4::new(
-            cot / self.aspect,  0f32,                                                   0f32, 0f32,
-            0f32,                cot,                                                   0f32, 0f32,
-            0f32,               0f32,                         self.far_plane_dist * inv_depth, 1f32,
-            0f32,               0f32, -self.far_plane_dist * self.near_plane_dist * inv_depth, 1f32,
+             cot,  0f32,  0f32,   0f32,
+            0f32, a*cot,  0f32,   0f32,
+            0f32,  0f32,   f_d,  n*f_d,
+            0f32,  0f32, -1f32,   0f32,
         );
     }
     fn calc_v_mat(&mut self) {
         self._v_cache = self.orientation.to_homogeneous();
-        self._v_cache.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&(self.position * -1.0));
+        self._v_cache.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.position);
+        if !self._v_cache.try_inverse_mut() { panic!("Could not invert view matrix!"); }
     }
     pub fn rot(&mut self, rotor: UnitQuaternion<f32>) {
-        self.orientation *= rotor;
+        self.orientation = rotor * self.orientation;
         self.calc_v_mat();
     }
     pub fn trans(&mut self, shift: Vector3<f32>) {
@@ -115,7 +130,11 @@ impl PerspectiveCamera {
         self.calc_v_mat();
     }
     pub fn trans_cam_space(&mut self, shift: Vector3<f32>) {
-        self.trans(self.orientation.inverse_transform_vector(&shift));
+        self.trans(self.orientation.transform_vector(&shift));
+    }
+    pub fn rot_cam_space(&mut self, rotor: UnitQuaternion<f32>) {
+        self.orientation = self.orientation * rotor;
+        self.calc_v_mat();
     }
     pub fn pos(&self) -> Vector3<f32> { self.position }
 }
@@ -124,7 +143,7 @@ impl Default for PerspectiveCamera {
         let mut cam = PerspectiveCamera {
             near_plane_dist: 0.01f32,
             far_plane_dist: 1000.0f32,
-            fov: 90.0f32,
+            fov: std::f32::consts::FRAC_PI_2,
             aspect: 1.0f32,
             orientation: UnitQuaternion::identity(),
             position: Vector3::zeros(),
@@ -133,6 +152,15 @@ impl Default for PerspectiveCamera {
         };
         cam.calc_p_mat();
         cam.calc_v_mat();
+        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., 0., -cam.near_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(1., 0., -cam.far_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(-1., 0., -cam.far_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., 1., -cam.far_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., -1., -cam.far_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at 1.", cam.p_mat() * Vector4::new(0., 0., -cam.far_plane_dist, 1.));
+        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -0.5, 1.));
+        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -1., 1.));
+        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -500., 1.));
         cam
     }
 }

@@ -1164,10 +1164,15 @@ dependencies = [
  "simple_logger 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)",
  "totality-model 0.1.0",
+ "totality-sim 0.1.0",
  "totality-sys 0.1.0",
  "totality-threading 0.1.0",
  "winit 0.18.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "totality-gui"
+version = "0.1.0"
 
 [[package]]
 name = "totality-model"
@@ -1182,8 +1187,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "totality-physics"
+name = "totality-sim"
 version = "0.1.0"
+dependencies = [
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "totality-model 0.1.0",
+ "totality-threading 0.1.0",
+]
 
 [[package]]
 name = "totality-sys"

@@ -2,16 +2,22 @@ use std::{sync::Arc, mem::size_of};
 use super::{Geom, Vertex, VMat, FMat, Model, Face};
 use na::{Matrix3, Vector3, Matrix, U2, U3};
 
+pub struct Static {
+    pub objs: Vec<Arc<Box<Geom>>>,
+}
+pub struct Dynamic {
+    pub mm: Vec<Model>,
+}
 
 pub struct Scene {
-    objs: Vec<Arc<Box<Geom>>>,
-    mm: Vec<Model>,
+    pub statics: Static,
+    pub dynamics: Dynamic,
 }
 impl Scene {
     pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> Scene {
         Scene {
-            objs: gg,
-            mm: mm
+            statics: Static { objs: gg },
+            dynamics: Dynamic { mm: mm },
         }
     }
 }

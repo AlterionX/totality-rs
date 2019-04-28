@@ -43,6 +43,51 @@ macro_rules! create_kt {
 }
 
 #[macro_export]
+macro_rules! create_duration_kt {
+    ( $type:ty, $dura:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+        {
+            use log::*;
+            use ::std::{
+                time::*,
+                sync::mpsc::*,
+            };
+            use $crate::killable_thread::KillableThread;
+            let (tx, rx) = std::sync::mpsc::channel();
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+                info!("Starting {} thread.", $name);
+                $($head)*;
+                let target = $dura;
+                loop {
+                    let curr_start_time = Instant::now();
+                    $($body)*;
+                    trace!("Checking for {} thread's death.", $name);
+                    match rx.try_recv() {
+                        // Cannot handle messages
+                        Ok(c) => panic!("Unexpected input {:?} into thread control channel.", c),
+                        // No input means continue
+                        Err(TryRecvError::Empty) => (),
+                        // Outside was dropped, so stop this thread
+                        Err(TryRecvError::Disconnected) => {
+                            info!("{} thread completed.", $name);
+                            break
+                        },
+                    };
+                    let busy_time = Instant::now() - curr_start_time;
+                    std::thread::sleep(target - busy_time);
+                    let total_time = Instant::now() - curr_start_time;
+                    trace!("{} thread spent {:?} busy and {:?} total in loop.", $name, busy_time, total_time);
+                }
+                let ret = {
+                    $($tail)*
+                };
+                trace!("{} thread winding down.", $name);
+                ret
+            })
+        }
+    }
+}
+
+#[macro_export]
 macro_rules! create_rated_kt {
     ( $type:ty, $rate:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
         {
@@ -75,12 +120,12 @@ macro_rules! create_rated_kt {
                     let busy_time = Instant::now() - curr_start_time;
                     std::thread::sleep(target - busy_time);
                     let total_time = Instant::now() - curr_start_time;
-                    trace!("{} thread spent {:?} busy and {:?} total in loop.", busy_time, total_time);
+                    trace!("{} thread spent {:?} busy and {:?} total in loop.", $name, busy_time, total_time);
                 }
                 let ret = {
                     $($tail)*
-                }
-                trace!("{} thread winding down.");
+                };
+                trace!("{} thread winding down.", $name);
                 ret
             })
         }

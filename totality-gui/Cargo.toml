@@ -1,5 +1,5 @@
 [package]
-name = "totality-physics"
+name = "totality-gui"
 version = "0.1.0"
 authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"

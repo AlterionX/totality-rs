@@ -248,7 +248,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         let loaded_buffers = vec![];
         let alloc_buffers = vec![AllocatedBuffer::new(
             &adapter, &device, None,
-            (3 * geom::Vertex::packed_byte_sz()) as u64,
+            (8 * geom::Vertex::packed_byte_sz()) as u64,
             buffer::Usage::VERTEX
         )?];
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
@@ -459,7 +459,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             depth_clamping: false,
             polygon_mode: PolygonMode::Fill,
             cull_face: Face::BACK,
-            front_face: FrontFace::Clockwise,
+            front_face: FrontFace::CounterClockwise,
             depth_bias: None,
             conservative: false,
         };
@@ -816,7 +816,7 @@ impl <I: Instance> Drop for Renderer<I> {
 pub struct RenderStage<I: Instance> {
     req_tx: Sender<RenderReq<I>>,
     // update_rx: Receiver<geom::Frame>,
-    scene: Arc<RwLock<Option<Scene>>>,
+    scene: Arc<Option<RwLock<Scene>>>,
     render_thread: Option<KillableThread<()>>,
 }
 impl <I: Instance> RenderStage<I> {
@@ -843,7 +843,7 @@ impl <I: Instance> RenderStage<I> {
             }
         }, {}).expect("Could not start render thread.... Welp I'm out.")
     }
-    fn new<F: RendererCreator<I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
+    fn new<F: RendererCreator<I>>(sc_arc: Arc<Option<RwLock<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
         let (req_tx, req_rx) = channel();
         RenderStage {
             req_tx: req_tx,
@@ -877,7 +877,7 @@ impl TypedRenderer {
     }
 }
 impl TypedRenderStage {
-    pub fn create(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>) -> TypedRenderStage {
+    pub fn create(sc_arc: Arc<Option<RwLock<Scene>>>, w: Arc<Window>) -> TypedRenderStage {
         TypedRenderStage::new(sc_arc, w, |w: &Window| -> Result<TypedRenderer, &'static str> {
             TypedRenderer::create(w)
         })

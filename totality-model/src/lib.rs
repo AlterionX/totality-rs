@@ -25,7 +25,7 @@ pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
 pub trait IntersectTestable {
     fn intersects(&self, t: Box<Geom>) -> Option<()>;
 }
-pub trait Geom {
+pub trait Geom: Send + Sync {
     fn verts(&self) -> &VMat;
     fn faces(&self) -> &FMat;
     fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat { self.verts().clone() }
@@ -67,7 +67,10 @@ pub trait Geom {
 // TODO should this be a trait?
 #[derive(Clone)]
 pub struct Model {
-    iso: Isometry3<f32>,
+    pos: Vector3<f32>,
+    vel: Vector3<f32>,
+    ori: UnitQuaternion<f32>,
+    omg: UnitQuaternion<f32>,
     pub source: Arc<Box<Geom>>,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
@@ -75,26 +78,34 @@ pub struct Model {
 impl Model {
     pub fn from_geom(g: Arc<Box<Geom>>) -> Model {
         Model {
-            iso: Isometry3::identity(),
+            pos: Vector3::zeros(),
+            vel: Vector3::zeros(),
+            ori: UnitQuaternion::identity(),
+            omg: UnitQuaternion::identity(),
             source: g.clone(),
             children: Option::None,
             parent: Option::None
         }
     }
-    pub fn m(&self) -> Isometry3<f32> { self.iso.clone() }
-    pub fn off(&self) -> Translation3<f32> { self.iso.translation.clone() }
-    pub fn off_v(&self) -> Vector3<f32> { self.iso.translation.vector.clone() }
-    pub fn rot(&self) -> Rotation3<f32> { Rotation3::from(self.rot_q()) }
-    pub fn rot_q(&self) -> UnitQuaternion<f32> { self.iso.rotation.clone() }
-    pub fn set_m(&mut self, m: &Isometry3<f32>) { self.iso = m.clone(); }
-    pub fn set_off(&mut self, offset: &Translation3<f32>) { self.iso.translation = offset.clone(); }
-    pub fn set_off_v(&mut self, offset: &Vector3<f32>) {
-        self.iso.translation = Translation3::from_vector(offset.clone());
+
+    pub fn set_state(&mut self, p: Vector3<f32>, v: Vector3<f32>, o: UnitQuaternion<f32>, omg: UnitQuaternion<f32>) {
+        self.set_pos(p);
+        self.set_vel(v);
+        self.set_ori(o);
+        self.set_omg(omg);
     }
-    pub fn set_rot(&mut self, rot: &Rotation3<f32>) {
-        self.iso.rotation = UnitQuaternion::from_rotation_matrix(rot);
+    pub fn set_pos(&mut self, p: Vector3<f32>) {
+        self.pos = p;
     }
-    pub fn set_rot_q(&mut self, rot: &UnitQuaternion<f32>) { self.iso.rotation = rot.clone(); }
+    pub fn set_vel(&mut self, v: Vector3<f32>) {
+        self.vel = v;
+    }
+    pub fn set_ori(&mut self, o: UnitQuaternion<f32>) {
+        self.ori = o;
+    }
+    pub fn set_omg(&mut self, o: UnitQuaternion<f32>) {
+        self.omg = o;
+    }
 
     pub fn flat_v(&self) -> Vec<f32> {
         self.source.flattened_verts_as_floats()
