@@ -85,8 +85,10 @@ pub struct Renderer<I: Instance> {
     command_pool: ManuallyDrop<CommandPool<I::Backend, Graphics>>,
 
     framebuffers: Vec<<I::Backend as Backend>::Framebuffer>,
+    depth_buffers: Vec<texture::DepthImage<I::Backend>>,
     image_views: Vec<(<I::Backend as Backend>::ImageView)>,
 
+    instance_model_buffers: Vec<AllocatedBuffer<I::Backend>>,
     loaded_images: Vec<LoadedImage<I::Backend>>,
     alloc_buffers: Vec<AllocatedBuffer<I::Backend>>,
     loaded_buffers: Vec<LoadedBuffer<Box<geom::Geom>, I::Backend>>,
@@ -109,6 +111,7 @@ pub struct Renderer<I: Instance> {
     _instance: ManuallyDrop<I>,
 }
 impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
+    pub const MAX_INSTANCE_COUNT: usize = 5000;
     fn new(w: &Window, inst: I, mut surf: B::Surface) -> Result<Self, &'static str> {
         let adapter = hal::Instance::enumerate_adapters(&inst)
             .into_iter()
@@ -233,18 +236,47 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 stencil_ops: AttachmentOps::DONT_CARE,
                 layouts: Layout::Undefined..Layout::Present,
             };
+            let depth_attachment = Attachment {
+                format: Some(Format::D32Float),
+                samples: 1,
+                ops: AttachmentOps {
+                    load: AttachmentLoadOp::Clear,
+                    store: AttachmentStoreOp::DontCare,
+                },
+                stencil_ops: AttachmentOps::DONT_CARE,
+                layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+            };
             let subpass = SubpassDesc {
                 colors: &[(0, Layout::ColorAttachmentOptimal)],
-                depth_stencil: None,
+                depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
                 inputs: &[],
                 resolves: &[],
                 preserves: &[],
             };
-            unsafe {
-                device
-                    .create_render_pass(&[color_attachment], &[subpass], &[])
-                    .map_err(|_| "Couldn't create a render pass!")?
-            }
+            let in_dependency = SubpassDependency {
+                passes: SubpassRef::External..SubpassRef::Pass(0),
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                    ..PipelineStage::COLOR_ATTACHMENT_OUTPUT | PipelineStage::EARLY_FRAGMENT_TESTS,
+                accesses: Access::empty()
+                    ..(Access::COLOR_ATTACHMENT_READ
+                    | Access::COLOR_ATTACHMENT_WRITE
+                    | Access::DEPTH_STENCIL_ATTACHMENT_READ
+                    | Access::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            };
+            let out_dependency = SubpassDependency {
+                passes: SubpassRef::Pass(0)..SubpassRef::External,
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT | PipelineStage::EARLY_FRAGMENT_TESTS
+                    ..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                accesses: (Access::COLOR_ATTACHMENT_READ
+                    | Access::COLOR_ATTACHMENT_WRITE
+                    | Access::DEPTH_STENCIL_ATTACHMENT_READ
+                    | Access::DEPTH_STENCIL_ATTACHMENT_WRITE)..Access::empty(),
+            };
+            unsafe { device.create_render_pass(
+                    &[color_attachment, depth_attachment],
+                    &[subpass],
+                    &[in_dependency, out_dependency],
+            ).map_err(|_| "Couldn't create a render pass!")? }
         };
         let loaded_buffers = vec![];
         let alloc_buffers = vec![AllocatedBuffer::new(
@@ -252,6 +284,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             (8 * geom::Vertex::packed_byte_sz()) as u64,
             buffer::Usage::VERTEX
         )?];
+        let instance_model_buffers = (0..3).map(|_| AllocatedBuffer::new(
+                &adapter, &device, None,
+                (16 * size_of::<f32>() * Self::MAX_INSTANCE_COUNT) as u64,
+                buffer::Usage::VERTEX,
+        )).collect::<Result<_, &str>>()?;
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
             Self::create_pipeline(&mut device, extent, &mut render_pass)?;
         let mut descriptor_pool = unsafe { device.create_descriptor_pool(
@@ -298,24 +335,21 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 .collect::<Result<Vec<_>, &str>>()?,
             Backbuffer::Framebuffer(_) => unimplemented!("Can't handle framebuffer backbuffer!"),
         };
-        let framebuffers = {
-            image_views
-                .iter()
-                .map(|image_view| unsafe {
-                    device
-                        .create_framebuffer(
-                            &render_pass,
-                            vec![image_view],
-                            Extent {
-                                width: extent.width as u32,
-                                height: extent.height as u32,
-                                depth: 1,
-                            },
-                        )
-                        .map_err(|_| "Failed to create a framebuffer!")
-                })
-                .collect::<Result<Vec<_>, &str>>()?
-        };
+        let depth_buffers = image_views.iter().map(|_| {
+            texture::DepthImage::new(&adapter, &device, extent)
+        }).collect::<Result<Vec<_>, &str>>()?;
+        let framebuffers = { image_views.iter().zip(depth_buffers.iter()).map(|(iv, db)| unsafe {
+            device.create_framebuffer(
+                &render_pass,
+                vec![iv, db.img_view_ref()],
+                Extent {
+                    width: extent.width as u32,
+                    height: extent.height as u32,
+                    depth: 1,
+                },
+            )
+            .map_err(|_| "Failed to create a framebuffer!")
+        }).collect::<Result<Vec<_>, &str>>()?};
         let mut command_pool = unsafe {
             device
                 .create_command_pool_typed(&queue_group, CommandPoolCreateFlags::RESET_INDIVIDUAL)
@@ -337,6 +371,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             command_pool: ManuallyDrop::new(command_pool),
 
             framebuffers: framebuffers,
+            depth_buffers: depth_buffers,
             image_views: image_views,
 
             descriptor_sets: descriptor_sets,
@@ -346,6 +381,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             descriptor_set_layouts: descriptor_set_layouts,
 
+            instance_model_buffers: instance_model_buffers,
             loaded_images: loaded_images,
             alloc_buffers: alloc_buffers,
             loaded_buffers: loaded_buffers,
@@ -432,6 +468,17 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             });
             curr_loc += 1;
         }
+        for i in 0..4 {
+            descs.push(AttributeDesc {
+                location: curr_loc,
+                binding: 1,
+                element: Element {
+                    format: Format::Rgba32Float,
+                    offset: (i * 4 * size_of::<f32>()) as u32,
+                }
+            });
+            curr_loc += 1;
+        }
         Ok(descs)
     }
     fn face_index_type() -> IndexType {
@@ -453,6 +500,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             binding: 0,
             stride: geom::Vertex::packed_byte_sz() as ElemStride,
             rate: 0,
+        }, VertexBufferDesc {
+            binding: 1,
+            stride: (size_of::<f32>() * 16) as ElemStride,
+            rate: 1,
         }];
         let attributes = Self::vertex_attribs()?;
         let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
@@ -465,7 +516,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             conservative: false,
         };
         let depth_stencil = pso::DepthStencilDesc {
-            depth: DepthTest::Off,
+            depth: DepthTest::On {
+                fun: gfx_hal::pso::Comparison::LessEqual,
+                write: true,
+            },
             depth_bounds: false,
             stencil: StencilTest::Off,
         };
@@ -594,7 +648,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             .map_err(|_| "Failed to present into the swapchain!")
         }
     }
-    fn draw_geom<C: Into<[f32; 4]>>(&mut self, m: geom::Model, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
+    fn draw_instanced_geom<C: Into<[f32; 4]>>(&mut self, mm: Vec<geom::Model>, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
         // FRAME PREP
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
@@ -619,14 +673,14 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         // LOAD ALL NEEDED DATA
         let vert_buffer = {
             let ref vb = self.alloc_buffers[0];
-            vb.load_data_from_slice(&mut self.device, &m.vv_as_bytes(), 0)?;
+            vb.load_data_from_slice(&mut self.device, &mm[0].vv_as_bytes(), 0)?;
             vb
         };
         let index_buffer = {
             let mut found_buffer = None;
             // TODO use a pointer map for O(1)ish look up later
             for b in self.loaded_buffers.iter() {
-                if b.matches_source(&m.source) {
+                if b.matches_source(&mm[0].source) {
                     found_buffer = Some(b);
                     break;
                 }
@@ -635,13 +689,23 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 self.loaded_buffers.push(LoadedBuffer::new(
                     &self._adapter, &mut self.device,
                     None,
-                    (&**m.source).ff_byte_cnt() as u64, buffer::Usage::INDEX,
-                    &m.ff_as_bytes(), m.source.clone()
+                    (&**mm[0].source).ff_byte_cnt() as u64, buffer::Usage::INDEX,
+                    &mm[0].ff_as_bytes(), mm[0].source.clone()
                 )?);
                 self.loaded_buffers.last().expect("Loaded buffer that was just pushed does not exist.")
             }
         };
-        if let Some(t) = m.source.texture() {
+        let model_buffer = {
+            let ref imb = self.instance_model_buffers[img_idx_usize];
+            imb.load_data(&self.device, |target| {
+                let stride = 16; // 16 floats = one 4x4 matrix
+                for i in 0..mm.len().min(Self::MAX_INSTANCE_COUNT) {
+                    target[i*stride..(i+1)*stride].copy_from_slice(&mm[i].mat().data);
+                }
+            })?;
+            imb
+        };
+        if let Some(t) = mm[0].source.texture() {
             // load image
             let mut load = None;
             for li in self.loaded_images.iter() {
@@ -671,8 +735,9 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         // RECORD COMMANDS + BIND BUFFERS
         unsafe {
             let buffer = &mut self.command_buffers[img_idx_usize];
-            const TRIANGLE_CLEAR: [ClearValue; 1] = [
-                ClearValue::Color(ClearColor::Float([0f32, 0f32, 0f32, 1.0]))
+            const TRIANGLE_CLEAR: [ClearValue; 2] = [
+                ClearValue::Color(ClearColor::Float([0f32, 0f32, 0f32, 1.0])),
+                ClearValue::DepthStencil(ClearDepthStencil(1.0, 0)),
             ];
             buffer.begin(false);
             {
@@ -684,23 +749,24 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 );
                 encoder.bind_graphics_pipeline(&self.graphics_pipeline);
                 let vert_buffer_ref: &B::Buffer = &vert_buffer.buffer_ref();
-                let buffers: ArrayVec<[_; 1]> = [(vert_buffer_ref, 0)].into();
+                let model_buffer_ref: &B::Buffer = &model_buffer.buffer_ref();
+                let buffers: ArrayVec<[_; 2]> = [(vert_buffer_ref, 0), (model_buffer_ref, 0)].into();
                 encoder.bind_vertex_buffers(0, buffers);
                 encoder.bind_index_buffer(buffer::IndexBufferView {
                     buffer: index_buffer.buffer_ref(),
                     offset: 0,
                     index_type: Self::face_index_type(),
                 });
-                if m.source.has_texture() {
+                if mm[0].source.has_texture() {
                     encoder.bind_graphics_descriptor_sets(
                         &self.pipeline_layout, 0,
                         Some(&self.descriptor_sets[img_idx_usize]), &[],
                     );
                 }
-                let mvp = cam.get_vp_mat() * m.mat();
+                let vp = cam.get_vp_mat();
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::VERTEX,
-                    0, &mvp.as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
+                    0, &vp.as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
@@ -708,9 +774,13 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
-                    20, &[if m.source.has_texture() { 1 } else { 0 }]
+                    20, &[if mm[0].source.has_texture() { 1 } else { 0 }]
                 );
-                encoder.draw_indexed(0..(m.source.ff_flat_cnt() as u32), 0, 0..1);
+                encoder.draw_indexed(
+                    0..(mm[0].source.ff_flat_cnt() as u32),
+                    0,
+                    0..(mm.len().min(Self::MAX_INSTANCE_COUNT) as u32)
+                );
             }
             buffer.finish();
         }
@@ -741,7 +811,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
     fn handle_req(r: &mut Renderer<I>, q: RenderReq<I>) -> Result<(), &'static str> {
         match q {
             RenderReq::Clear(Color(c)) => r.clear_color(c),
-            RenderReq::Draw(m, cam, Color(c)) => r.draw_geom(m, cam, c),
+            RenderReq::Draw(m, cam, Color(c)) => r.draw_instanced_geom(vec![m], cam, c),
             RenderReq::Free(a) => match a.lock() {
                 Ok(mut f) => Result::Ok(f.deref_mut()(r)),
                 Err(_) => Result::Err("I hate when I'm given poisoned cookies."),
@@ -783,12 +853,18 @@ impl <I: Instance> Drop for Renderer<I> {
             for fb in self.framebuffers.drain(..) {
                 self.device.destroy_framebuffer(fb)
             }
+            for db in self.depth_buffers.drain(..) {
+                db.free(&self.device);
+            }
             for iv in self.image_views.drain(..) {
                 self.device.destroy_image_view(iv)
             }
 
             for b in self.loaded_images.drain(..) {
                 b.free(&self.device);
+            }
+            for imb in self.instance_model_buffers.drain(..) {
+                imb.free(&self.device);
             }
             for b in self.alloc_buffers.drain(..) {
                 b.free(&self.device);
