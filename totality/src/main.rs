@@ -18,7 +18,7 @@ use std::{
 
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
-use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{IT, Color, TypedRenderReq, RenderReq, TypedRenderStage}};
+use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{IT, Color, TypedRenderReq, RenderReq, TypedRenderStage, RenderSettings}};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
 
@@ -58,6 +58,9 @@ struct State {
     // shutdown flow
     shutdown: Arc<Mutex<io::cb::CBFn>>,
     current_action: Arc<Mutex<Action>>,
+    // graphics settings
+    should_use_depth: Arc<Mutex<bool>>,
+    settings_cb: Arc<Mutex<io::cb::CBFn>>,
     // color flow
     color: Arc<Mutex<na::Vector4<f32>>>,
     color_changer: Arc<Mutex<io::cb::CBFn>>,
@@ -74,15 +77,15 @@ impl State {
         let mut sm = io::Manager::new();
         let c_tri0 = Arc::new(Box::new(geom::scene::TriGeom::new(
              na::Matrix3::new(
-                 0.5,  0.5,  -1f32,
-                -0.5,  0.5,  -1f32,
-                 0f32, 0f32, -1f32,
-            ),
-            na::Vector3::new(2u32, 1, 0),
+                 0.5, 0., -0.5,
+                -0.5, 0., -0.5,
+                 0.5, 0.,  0.5,
+            ).transpose(),
+            na::Vector3::new(2, 1, 0),
             vec![[0f32, 0f32], [1f32, 0f32], [0f32, 1f32]],
             Some("totality/res/thomas-veyrat-anglerfish-view01-3-4.jpg".to_string()),
         )) as Box<geom::Geom>);
-        let c_tri1 = Arc::new(Box::new({
+        let c_box = Arc::new(Box::new({
             geom::scene::TriMeshGeom::new(
                 geom::VMat::from_iterator(8, vec![
                     -0.5, -0.5, -0.5,
@@ -112,12 +115,17 @@ impl State {
             )
         }) as Box<geom::Geom>);
         info!("Constructed Triangle!");
-        let mut box_model = geom::Model::from_geom(c_tri1.clone());
-        box_model.set_omg(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), 1.0));
-        box_model.set_scale(0.5);
+        let mut box0_model = geom::Model::from_geom(c_box.clone());
+        box0_model.set_omg(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), -1.0));
+        box0_model.set_scale(0.5);
+        box0_model.set_pos(na::Vector3::new(0., 0.25, 0.));
+        let mut box1_model = geom::Model::from_geom(c_box.clone());
+        box1_model.set_omg(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), 1.0));
+        box1_model.set_scale(1.);
+        box1_model.set_pos(na::Vector3::new(0., -0.5, 0.));
         let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
-            vec![c_tri0.clone(), c_tri1.clone()],
-            vec![geom::Model::from_geom(c_tri0.clone()), box_model]
+            vec![c_tri0.clone(), c_box.clone()],
+            vec![geom::Model::from_geom(c_tri0.clone()), box0_model, box1_model]
         ))));
         let renderer = Option::Some(TypedRenderStage::create(sc.clone(), sm.win.clone()));
         // set up shutdown flow
@@ -128,6 +136,18 @@ impl State {
         };
         sm.reg_imm(b::C::F(b::Flag::Close).into(), cb_shutdown.clone());
         sm.reg_imm(b::C::S(b::Key::Esc).into(), cb_shutdown.clone());
+        // set up settings flow
+        let c_should_use_depth = Arc::new(Mutex::new(false));
+        let cb_settings = {
+            let c_should_use_depth = c_should_use_depth.clone();
+            cb_arc!("Depth Usage Toggle", v, s, {
+                if let V::B(b::V(_, b::State::UP)) = v {
+                    if let Ok(mut f) = c_should_use_depth.lock() { (*f) = !*f }
+                }
+            })
+        };
+        sm.reg_imm(b::C::A('u').into(), cb_settings.clone());
+        // set up render flow
         let c_fish = Arc::new(Mutex::new(1));
         let cb_change_fish = {
             let c_fish = c_fish.clone();
@@ -213,11 +233,8 @@ impl State {
         };
         if let Ok(mut cam) = cam.lock() {
             (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), std::f32::consts::FRAC_PI_4));
-            (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), std::f32::consts::FRAC_PI_4));
+            (*cam).rot_cam_space(UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), -std::f32::consts::FRAC_PI_4));
             (*cam).trans_cam_space(na::Vector3::new(0., 0., 1.));
-            if let geom::camera::Camera::Perspective(mut p) = *cam {
-                info!("Camers: {:?}", p);
-            }
         }
         // sm.reg_per(b::C::A('n').into(), cb_rotor.clone());
         info!("Finished initial setup.");
@@ -232,6 +249,9 @@ impl State {
             // shutdown flow
             shutdown: cb_shutdown,
             current_action: c_act,
+            // graphics settings
+            should_use_depth: c_should_use_depth,
+            settings_cb: cb_settings,
             // color flow
             color: c_color,
             color_changer: cb_color,
@@ -252,7 +272,7 @@ impl State {
         // TODO render
         // render(&mut self.r, &self.sc).expect("Nothing should be wrong yet...");
         let original_color = self.color.lock().expect("Seriously?");
-        let fish_id = self.fish.lock().expect("Seriously?");
+        let draw_id = *self.fish.lock().expect("Seriously?");
         let cam_clone = (*if let Ok(ref cam) = self.camera.lock() { cam } else { panic!("Camera poisoned!") }).clone();
         let rs_ref = if let Some(ref rs) = self.rs { rs } else { return Action::Continue; };
         if let Ok(ref sc_g) = self.sc.read() {
@@ -260,16 +280,55 @@ impl State {
                 sc.snatch()
             } else { panic!("The scene mutex is poisoned.") };
             if let Ok(mm_g) = dyns.read() {
-                let model_clone = mm_g.mm[*fish_id as usize].clone();
-                rs_ref.send_cmd(RenderReq::Draw(
-                    model_clone, cam_clone,
-                    Color(na::Vector4::new(
-                            original_color[0] as f32,
-                            original_color[1] as f32,
-                            original_color[2] as f32,
-                            original_color[3] as f32,
-                    ))
-                )).expect("No problems expected.");
+                if draw_id == 0 {
+                    let model_clone = mm_g.mm[draw_id as usize].clone();
+                    if let Ok(sud_g) = self.should_use_depth.lock() {
+                        rs_ref.send_cmd(RenderReq::DrawGroupWithSetting(
+                            vec![model_clone], cam_clone,
+                            Color(na::Vector4::new(
+                                    original_color[0] as f32,
+                                    original_color[1] as f32,
+                                    original_color[2] as f32,
+                                    original_color[3] as f32,
+                            )),
+                            RenderSettings { should_use_depth: *sud_g },
+                        )).expect("No problems expected.");
+                    } else {
+                        rs_ref.send_cmd(RenderReq::Draw(
+                            model_clone, cam_clone,
+                            Color(na::Vector4::new(
+                                    original_color[0] as f32,
+                                    original_color[1] as f32,
+                                    original_color[2] as f32,
+                                    original_color[3] as f32,
+                            ))
+                        )).expect("No problems expected.");
+                    }
+                } else {
+                    let model_clones = vec![mm_g.mm[1].clone(), mm_g.mm[2].clone()];
+                    if let Ok(sud_g) = self.should_use_depth.lock() {
+                        rs_ref.send_cmd(RenderReq::DrawGroupWithSetting(
+                            model_clones, cam_clone,
+                            Color(na::Vector4::new(
+                                    original_color[0] as f32,
+                                    original_color[1] as f32,
+                                    original_color[2] as f32,
+                                    original_color[3] as f32,
+                            )),
+                            RenderSettings { should_use_depth: *sud_g },
+                        )).expect("No problems expected.");
+                    } else {
+                        rs_ref.send_cmd(RenderReq::DrawGroup(
+                            model_clones, cam_clone,
+                            Color(na::Vector4::new(
+                                    original_color[0] as f32,
+                                    original_color[1] as f32,
+                                    original_color[2] as f32,
+                                    original_color[3] as f32,
+                            ))
+                        )).expect("No problems expected.");
+                    }
+                }
             };
         }
         // Every <variable> invocations

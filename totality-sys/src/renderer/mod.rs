@@ -65,11 +65,16 @@ impl <F: Fn(&Window) -> Result<Renderer<I>, &'static str> + Send + 'static, I: I
 pub trait RenderFn<I: Instance>: FnMut(&mut Renderer<I>) + Send + 'static {}
 impl <F: FnMut(&mut Renderer<I>) + Send + 'static, I: Instance> RenderFn<I> for F {}
 pub struct Color(pub Vector4<f32>);
+pub struct RenderSettings {
+    pub should_use_depth: bool,
+}
 pub enum RenderReq<I: Instance> {
     Restart,
     Clear(Color),
     Seq(Vec<RenderReq<I>>),
     Draw(geom::Model, geom::camera::Camera, Color),
+    DrawGroup(Vec<geom::Model>, geom::camera::Camera, Color),
+    DrawGroupWithSetting(Vec<geom::Model>, geom::camera::Camera, Color, RenderSettings),
     Free(Arc<Mutex<RenderFn<I>>>),
 }
 
@@ -85,6 +90,7 @@ pub struct Renderer<I: Instance> {
     command_pool: ManuallyDrop<CommandPool<I::Backend, Graphics>>,
 
     framebuffers: Vec<<I::Backend as Backend>::Framebuffer>,
+    framebuffers_no_depth: Vec<<I::Backend as Backend>::Framebuffer>,
     depth_buffers: Vec<texture::DepthImage<I::Backend>>,
     image_views: Vec<(<I::Backend as Backend>::ImageView)>,
 
@@ -97,10 +103,12 @@ pub struct Renderer<I: Instance> {
     descriptor_pool: ManuallyDrop<<I::Backend as Backend>::DescriptorPool>,
 
     graphics_pipeline: ManuallyDrop<<I::Backend as Backend>::GraphicsPipeline>,
+    graphics_pipeline_no_depth: ManuallyDrop<<I::Backend as Backend>::GraphicsPipeline>,
     pipeline_layout: ManuallyDrop<<I::Backend as Backend>::PipelineLayout>,
     descriptor_set_layouts: Vec<<I::Backend as Backend>::DescriptorSetLayout>,
 
     render_pass: ManuallyDrop<<I::Backend as Backend>::RenderPass>,
+    render_pass_no_depth: ManuallyDrop<<I::Backend as Backend>::RenderPass>,
     render_area: Rect,
     queue_group: ManuallyDrop<QueueGroup<I::Backend, Graphics>>,
     swapchain: ManuallyDrop<<I::Backend as Backend>::Swapchain>,
@@ -111,7 +119,7 @@ pub struct Renderer<I: Instance> {
     _instance: ManuallyDrop<I>,
 }
 impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
-    pub const MAX_INSTANCE_COUNT: usize = 5000;
+    pub const MAX_INSTANCE_COUNT: usize = 5_000_000; // TODO set this dynamically
     fn new(w: &Window, inst: I, mut surf: B::Surface) -> Result<Self, &'static str> {
         let adapter = hal::Instance::enumerate_adapters(&inst)
             .into_iter()
@@ -278,6 +286,30 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                     &[in_dependency, out_dependency],
             ).map_err(|_| "Couldn't create a render pass!")? }
         };
+        let mut render_pass_no_depth = {
+            let color_attachment = Attachment {
+                format: Some(format),
+                samples: 1,
+                ops: AttachmentOps {
+                    load: AttachmentLoadOp::Clear,
+                    store: AttachmentStoreOp::Store,
+                },
+                stencil_ops: AttachmentOps::DONT_CARE,
+                layouts: Layout::Undefined..Layout::Present,
+            };
+            let subpass = SubpassDesc {
+                colors: &[(0, Layout::ColorAttachmentOptimal)],
+                depth_stencil: None, //Some(&(1, Layout::DepthStencilAttachmentOptimal)),
+                inputs: &[],
+                resolves: &[],
+                preserves: &[],
+            };
+            unsafe { device.create_render_pass(
+                    &[color_attachment],
+                    &[subpass],
+                    &[],
+            ).map_err(|_| "Couldn't create a render pass!")? }
+        };
         let loaded_buffers = vec![];
         let alloc_buffers = vec![AllocatedBuffer::new(
             &adapter, &device, None,
@@ -289,8 +321,8 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 (16 * size_of::<f32>() * Self::MAX_INSTANCE_COUNT) as u64,
                 buffer::Usage::VERTEX,
         )).collect::<Result<_, &str>>()?;
-        let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-            Self::create_pipeline(&mut device, extent, &mut render_pass)?;
+        let (descriptor_set_layouts, pipeline_layout, graphics_pipeline, graphics_pipeline_no_depth) =
+            Self::create_pipeline(&mut device, extent, &mut render_pass, &mut render_pass_no_depth)?;
         let mut descriptor_pool = unsafe { device.create_descriptor_pool(
             max_frames_in_flight, // sets
             &[gfx_hal::pso::DescriptorRangeDesc {
@@ -350,12 +382,24 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             )
             .map_err(|_| "Failed to create a framebuffer!")
         }).collect::<Result<Vec<_>, &str>>()?};
+        let framebuffers_no_depth = { image_views.iter().map(|iv| unsafe {
+            device.create_framebuffer(
+                &render_pass_no_depth,
+                vec![iv],
+                Extent {
+                    width: extent.width as u32,
+                    height: extent.height as u32,
+                    depth: 1,
+                },
+            )
+            .map_err(|_| "Failed to create a framebuffer!")
+        }).collect::<Result<Vec<_>, &str>>()?};
         let mut command_pool = unsafe {
             device
                 .create_command_pool_typed(&queue_group, CommandPoolCreateFlags::RESET_INDIVIDUAL)
                 .map_err(|_| "Could not create the raw command pool!")?
         };
-        let command_buffers: Vec<_> = framebuffers.iter().map(|_| command_pool.acquire_command_buffer()).collect();
+        let command_buffers: Vec<_> = (0..max_frames_in_flight).map(|_| command_pool.acquire_command_buffer()).collect();
         // 4. You create the actual descriptors which you want to write into the
         //    allocated descriptor set (in this case an image and a sampler)
         let loaded_images = vec![];
@@ -371,6 +415,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             command_pool: ManuallyDrop::new(command_pool),
 
             framebuffers: framebuffers,
+            framebuffers_no_depth: framebuffers_no_depth,
             depth_buffers: depth_buffers,
             image_views: image_views,
 
@@ -378,6 +423,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             descriptor_pool: ManuallyDrop::new(descriptor_pool),
 
             graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
+            graphics_pipeline_no_depth: ManuallyDrop::new(graphics_pipeline_no_depth),
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             descriptor_set_layouts: descriptor_set_layouts,
 
@@ -387,6 +433,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             loaded_buffers: loaded_buffers,
 
             render_pass: ManuallyDrop::new(render_pass),
+            render_pass_no_depth: ManuallyDrop::new(render_pass_no_depth),
             render_area: Extent::rect(&extent.to_extent()),
             queue_group: ManuallyDrop::new(queue_group),
             swapchain: ManuallyDrop::new(swapchain),
@@ -485,11 +532,18 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         // TODO do this smarter
         IndexType::U32
     }
-    fn create_pipeline(device: &mut D, extent: Extent2D, render_pass: &B::RenderPass) -> Result<(
-        Vec<B::DescriptorSetLayout>, B::PipelineLayout, B::GraphicsPipeline,
+    fn create_pipeline(device: &mut D, extent: Extent2D, render_pass: &B::RenderPass, render_pass_no_depth: &B::RenderPass) -> Result<(
+        Vec<B::DescriptorSetLayout>, B::PipelineLayout, B::GraphicsPipeline, B::GraphicsPipeline,
     ), &'static str> {
         let compiled_shaders = Self::create_shaders(device)?;
         let shaders = GraphicsShaderSet {
+            vertex: compiled_shaders[0].get_entry(),
+            hull: None,
+            domain: None,
+            geometry: None,
+            fragment: Some(compiled_shaders[1].get_entry()),
+        };
+        let shaders_no_depth = GraphicsShaderSet {
             vertex: compiled_shaders[0].get_entry(),
             hull: None,
             domain: None,
@@ -505,13 +559,32 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             stride: (size_of::<f32>() * 16) as ElemStride,
             rate: 1,
         }];
+        let vertex_buffers_no_depth: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
+            binding: 0,
+            stride: geom::Vertex::packed_byte_sz() as ElemStride,
+            rate: 0,
+        }, VertexBufferDesc {
+            binding: 1,
+            stride: (size_of::<f32>() * 16) as ElemStride,
+            rate: 1,
+        }];
         let attributes = Self::vertex_attribs()?;
+        let attributes_no_depth = Self::vertex_attribs()?;
         let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
+        let input_assembler_no_depth = InputAssemblerDesc::new(Primitive::TriangleList);
         let rasterizer = Rasterizer {
             depth_clamping: false,
             polygon_mode: PolygonMode::Fill,
             cull_face: Face::BACK,
-            front_face: FrontFace::CounterClockwise,
+            front_face: FrontFace::Clockwise,
+            depth_bias: None,
+            conservative: false,
+        };
+        let rasterizer_no_depth = Rasterizer {
+            depth_clamping: false,
+            polygon_mode: PolygonMode::Fill,
+            cull_face: Face::BACK,
+            front_face: FrontFace::Clockwise,
             depth_bias: None,
             conservative: false,
         };
@@ -520,6 +593,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 fun: gfx_hal::pso::Comparison::LessEqual,
                 write: true,
             },
+            depth_bounds: false,
+            stencil: StencilTest::Off,
+        };
+        let depth_stencil_no_depth = pso::DepthStencilDesc {
+            depth: DepthTest::Off,
             depth_bounds: false,
             stencil: StencilTest::Off,
         };
@@ -539,7 +617,32 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
             }
         };
+        let blender_no_depth = {
+            let blend_state = BlendState::On {
+                color: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+                alpha: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+            };
+            BlendDesc {
+                logic_op: Some(LogicOp::Copy),
+                targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
+            }
+        };
         let baked_states = BakedStates {
+            viewport: Some(Viewport {
+                rect: extent.to_extent().rect(),
+                depth: (0.0..1.0),
+            }),
+            scissor: Some(extent.to_extent().rect()),
+            blend_color: None,
+            depth_bounds: None,
+        };
+        let baked_states_no_depth = BakedStates {
             viewport: Some(Viewport {
                 rect: extent.to_extent().rect(),
                 depth: (0.0..1.0),
@@ -582,8 +685,32 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                     .map_err(|_| {"Couldn't create a graphics pipeline!"})?
             }
         };
+        let gp_no_depth = {
+            let desc = GraphicsPipelineDesc {
+                shaders:        shaders_no_depth,
+                rasterizer:     rasterizer_no_depth,
+                vertex_buffers: vertex_buffers_no_depth,
+                attributes:     attributes_no_depth,
+                input_assembler:input_assembler_no_depth,
+                blender:        blender_no_depth,
+                depth_stencil: depth_stencil_no_depth,
+                multisampling: None,
+                baked_states: baked_states_no_depth,
+                layout: &layout,
+                subpass: Subpass {
+                  index: 0,
+                  main_pass: render_pass_no_depth,
+                },
+                flags: PipelineCreationFlags::empty(),
+                parent: BasePipeline::None,
+            };
+            unsafe {
+                device.create_graphics_pipeline(&desc, None)
+                    .map_err(|_| {"Couldn't create a graphics pipeline!"})?
+            }
+        };
         Self::destroy_shader_modules(device, compiled_shaders);
-        Result::Ok((descriptor_set_layouts, layout, gp))
+        Result::Ok((descriptor_set_layouts, layout, gp, gp_no_depth))
     }
     fn draw_empty_scene(&mut self) -> Result<(), &'static str> {
         let since_epoch = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -801,6 +928,158 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 .map_err(|_| "Failed to present into the swapchain!")
         }
     }
+    fn draw_instanced_geom_no_depth<C: Into<[f32; 4]>>(&mut self, mm: Vec<geom::Model>, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
+        // FRAME PREP
+        let image_available = &self.image_available_semaphores[self.current_frame];
+        let render_finished = &self.render_finished_semaphores[self.current_frame];
+        // Advance the frame _before_ we start using the `?` operator
+        self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
+        let (img_idx_u32, img_idx_usize) = unsafe {
+            let image_index = self
+                .swapchain
+                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+                .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
+            (image_index, image_index as usize)
+        };
+        let flight_fence = &self.in_flight_fences[img_idx_usize];
+        unsafe {
+            self.device
+                .wait_for_fence(flight_fence, core::u64::MAX)
+                .map_err(|_| "Failed to wait on the fence!")?;
+            self.device
+                .reset_fence(flight_fence)
+                .map_err(|_| "Couldn't reset the fence!")?;
+        }
+        // LOAD ALL NEEDED DATA
+        let vert_buffer = {
+            let ref vb = self.alloc_buffers[0];
+            vb.load_data_from_slice(&mut self.device, &mm[0].vv_as_bytes(), 0)?;
+            vb
+        };
+        let index_buffer = {
+            let mut found_buffer = None;
+            // TODO use a pointer map for O(1)ish look up later
+            for b in self.loaded_buffers.iter() {
+                if b.matches_source(&mm[0].source) {
+                    found_buffer = Some(b);
+                    break;
+                }
+            }
+            if let Some(b) = found_buffer { b } else {
+                self.loaded_buffers.push(LoadedBuffer::new(
+                    &self._adapter, &mut self.device,
+                    None,
+                    (&**mm[0].source).ff_byte_cnt() as u64, buffer::Usage::INDEX,
+                    &mm[0].ff_as_bytes(), mm[0].source.clone()
+                )?);
+                self.loaded_buffers.last().expect("Loaded buffer that was just pushed does not exist.")
+            }
+        };
+        let model_buffer = {
+            let ref imb = self.instance_model_buffers[img_idx_usize];
+            imb.load_data(&self.device, |target| {
+                let stride = 16; // 16 floats = one 4x4 matrix
+                for i in 0..mm.len().min(Self::MAX_INSTANCE_COUNT) {
+                    target[i*stride..(i+1)*stride].copy_from_slice(&mm[i].mat().data);
+                }
+            })?;
+            imb
+        };
+        if let Some(t) = mm[0].source.texture() {
+            // load image
+            let mut load = None;
+            for li in self.loaded_images.iter() {
+                if li.name == *t {
+                    load = Some(li)
+                }
+            }
+            let li = if let Some(l) = load { l } else {
+                self.loaded_images.push(LoadedImage::new(
+                    &self._adapter, &mut self.device, &mut self.command_pool, &mut self.queue_group.queues[0],
+                    img::open(t).expect("Texture broken!").to_rgba(), t.clone(),
+                )?);
+                self.loaded_images.last().expect("Something that was just put into the vector is missing.")
+            };
+            // bind to descriptor set
+            unsafe { self.device.write_descriptor_sets(vec![gfx_hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[img_idx_usize], binding: 0, array_offset: 0,
+                descriptors: Some(gfx_hal::pso::Descriptor::Image(
+                    li.img_view_ref(),
+                    Layout::ShaderReadOnlyOptimal
+                )),
+            }, gfx_hal::pso::DescriptorSetWrite {
+                  set: &self.descriptor_sets[img_idx_usize], binding: 1, array_offset: 0,
+                  descriptors: Some(gfx_hal::pso::Descriptor::Sampler(li.sampler_ref())),
+            }]); }
+        }
+        // RECORD COMMANDS + BIND BUFFERS
+        unsafe {
+            let buffer = &mut self.command_buffers[img_idx_usize];
+            const TRIANGLE_CLEAR: [ClearValue; 1] = [
+                ClearValue::Color(ClearColor::Float([0f32, 0f32, 0f32, 1.0])),
+            ];
+            buffer.begin(false);
+            {
+                let mut encoder = buffer.begin_render_pass_inline(
+                    &self.render_pass_no_depth,
+                    &self.framebuffers_no_depth[img_idx_usize],
+                    self.render_area,
+                    TRIANGLE_CLEAR.iter(),
+                );
+                encoder.bind_graphics_pipeline(&self.graphics_pipeline_no_depth);
+                let vert_buffer_ref: &B::Buffer = &vert_buffer.buffer_ref();
+                let model_buffer_ref: &B::Buffer = &model_buffer.buffer_ref();
+                let buffers: ArrayVec<[_; 2]> = [(vert_buffer_ref, 0), (model_buffer_ref, 0)].into();
+                encoder.bind_vertex_buffers(0, buffers);
+                encoder.bind_index_buffer(buffer::IndexBufferView {
+                    buffer: index_buffer.buffer_ref(),
+                    offset: 0,
+                    index_type: Self::face_index_type(),
+                });
+                if mm[0].source.has_texture() {
+                    encoder.bind_graphics_descriptor_sets(
+                        &self.pipeline_layout, 0,
+                        Some(&self.descriptor_sets[img_idx_usize]), &[],
+                    );
+                }
+                let vp = cam.get_vp_mat();
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout, ShaderStageFlags::VERTEX,
+                    0, &vp.as_slice().iter().map(|f| (*f).to_bits()).collect::<Vec<u32>>()[..]
+                );
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
+                    16, &Self::as_buffer(&color.into())
+                );
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
+                    20, &[if mm[0].source.has_texture() { 1 } else { 0 }]
+                );
+                encoder.draw_indexed(
+                    0..(mm[0].source.ff_flat_cnt() as u32),
+                    0,
+                    0..(mm.len().min(Self::MAX_INSTANCE_COUNT) as u32)
+                );
+            }
+            buffer.finish();
+        }
+        // SUBMIT COMMANDS
+        let command_buffers = &self.command_buffers[img_idx_usize..=img_idx_usize];
+        let wait_semaphores: ArrayVec<[_; 1]> = [(image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
+        let signal_semaphores: ArrayVec<[_; 1]> = [render_finished].into();
+        let present_wait_semaphores: ArrayVec<[_; 1]> = [render_finished].into();
+        let submission = Submission {
+            command_buffers,
+            wait_semaphores,
+            signal_semaphores,
+        };
+        let the_command_queue = &mut self.queue_group.queues[0];
+        unsafe {
+            the_command_queue.submit(submission, Some(flight_fence));
+            self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
+                .map_err(|_| "Failed to present into the swapchain!")
+        }
+    }
     fn as_buffer(v: &[f32; 4]) -> [u32; 4] {
         let mut av: [u32; 4] = unsafe { std::mem::uninitialized() };
         for (i, seg) in v.iter().enumerate() {
@@ -812,6 +1091,14 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         match q {
             RenderReq::Clear(Color(c)) => r.clear_color(c),
             RenderReq::Draw(m, cam, Color(c)) => r.draw_instanced_geom(vec![m], cam, c),
+            RenderReq::DrawGroup(mm, cam, Color(c)) => r.draw_instanced_geom(mm, cam, c),
+            RenderReq::DrawGroupWithSetting(mm, cam, Color(c), settings) => {
+                if settings.should_use_depth {
+                    r.draw_instanced_geom(mm, cam, c)
+                } else {
+                    r.draw_instanced_geom_no_depth(mm, cam, c)
+                }
+            },
             RenderReq::Free(a) => match a.lock() {
                 Ok(mut f) => Result::Ok(f.deref_mut()(r)),
                 Err(_) => Result::Err("I hate when I'm given poisoned cookies."),
@@ -845,12 +1132,16 @@ impl <I: Instance> Drop for Renderer<I> {
             self.device.destroy_descriptor_pool(ManuallyDrop::into_inner(read(&mut self.descriptor_pool)));
 
             self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&mut self.graphics_pipeline)));
+            self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&mut self.graphics_pipeline_no_depth)));
             self.device.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&mut self.pipeline_layout)));
             for dsl in self.descriptor_set_layouts.drain(..) {
                 self.device.destroy_descriptor_set_layout(dsl);
             }
 
             for fb in self.framebuffers.drain(..) {
+                self.device.destroy_framebuffer(fb)
+            }
+            for fb in self.framebuffers_no_depth.drain(..) {
                 self.device.destroy_framebuffer(fb)
             }
             for db in self.depth_buffers.drain(..) {
@@ -879,10 +1170,14 @@ impl <I: Instance> Drop for Renderer<I> {
             self.device.destroy_render_pass(
                 ManuallyDrop::into_inner(read(&mut self.render_pass))
             );
+            self.device.destroy_render_pass(
+                ManuallyDrop::into_inner(read(&mut self.render_pass_no_depth))
+            );
             self.device.destroy_swapchain(
                 ManuallyDrop::into_inner(read(&mut self.swapchain))
             );
             ManuallyDrop::drop(&mut self.graphics_pipeline);
+            ManuallyDrop::drop(&mut self.graphics_pipeline_no_depth);
             ManuallyDrop::drop(&mut self.pipeline_layout);
             ManuallyDrop::drop(&mut self.queue_group);
             ManuallyDrop::drop(&mut self.device);

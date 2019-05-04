@@ -59,7 +59,7 @@ impl OrthoCamera {
     pub fn v_mat(&self) -> Matrix4<f32> { self._v_cache }
     pub fn p_mat(&self) -> Matrix4<f32> { self._p_cache }
     pub fn vp_mat(&self) -> Matrix4<f32> { self.p_mat() * self.v_mat() }
-    fn calc_p_mat(&mut self) { self._p_cache.fill_with_identity() }
+    fn calc_p_mat(&mut self) { self._p_cache.fill_with_identity(); self._p_cache[(1, 1)] = -1.; }
     fn calc_v_mat(&mut self) {
         self._v_cache.fill_with_identity();
         self._v_cache[(2, 2)] = -1.;
@@ -107,7 +107,7 @@ impl PerspectiveCamera {
         let n = self.near_plane_dist;
         let f = self.far_plane_dist;
         let f_d = f / (n - f);
-        let a = self.aspect;
+        let a = -self.aspect;
         let cot = 1. / (self.fov * 0.5).tan();
         self._p_cache = Matrix4::new(
              cot,  0f32,  0f32,   0f32,
@@ -152,15 +152,6 @@ impl Default for PerspectiveCamera {
         };
         cam.calc_p_mat();
         cam.calc_v_mat();
-        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., 0., -cam.near_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(1., 0., -cam.far_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(-1., 0., -cam.far_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., 1., -cam.far_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at 0.", cam.p_mat() * Vector4::new(0., -1., -cam.far_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at 1.", cam.p_mat() * Vector4::new(0., 0., -cam.far_plane_dist, 1.));
-        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -0.5, 1.));
-        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -1., 1.));
-        info!("Z axis maps to {:?} in view port, should be at ?.", cam.p_mat() * Vector4::new(0., 0., -500., 1.));
         cam
     }
 }

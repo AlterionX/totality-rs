@@ -73,6 +73,7 @@ pub struct Model {
     pub omg: UnitQuaternion<f32>,
     pub scale: f32,
     pub source: Arc<Box<Geom>>,
+    should_render: bool,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
 }
@@ -85,6 +86,7 @@ impl Model {
             omg: UnitQuaternion::identity(),
             scale: 1.,
             source: g.clone(),
+            should_render: false,
             children: Option::None,
             parent: Option::None
         }
@@ -113,12 +115,15 @@ impl Model {
         self.scale = scale;
     }
 
+    pub fn set_should_render(&mut self, b: bool) {
+        self.should_render = b;
+    }
+
      pub fn mat(&self) -> Matrix4<f32> {
-         let inv_s = 1. / self.scale;
-         let mut rot = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[inv_s, inv_s, inv_s, 1.0]);
-         rot.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
-         if !rot.try_inverse_mut() { panic!("Could not invert view matrix!"); }
-         rot
+         let s = self.scale;
+         let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
+         t_mat.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
+         t_mat
      }
     pub fn flat_v(&self) -> Vec<f32> {
         self.source.flattened_verts_as_floats()
