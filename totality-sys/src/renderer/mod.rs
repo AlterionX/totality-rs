@@ -121,32 +121,20 @@ pub struct Renderer<I: Instance> {
 impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
     pub const MAX_INSTANCE_COUNT: usize = 5_000_000; // TODO set this dynamically
     fn new(w: &Window, inst: I, mut surf: B::Surface) -> Result<Self, &'static str> {
-        let adapter = hal::Instance::enumerate_adapters(&inst)
-            .into_iter()
-            .find(|a| {
-                a.queue_families.iter()
-                    .any(|qf| qf.supports_graphics() && surf.supports_queue_family(qf))
-             })
-             .ok_or("Couldn't find a graphical Adapter!")?;
+        let adapter = hal::Instance::enumerate_adapters(&inst).into_iter().find(|a| {
+           a.queue_families.iter()
+               .any(|qf| qf.supports_graphics() && surf.supports_queue_family(qf))
+        }).ok_or("Couldn't find a graphical Adapter!")?;
         let (mut device, queue_group) = {
-            let queue_family = adapter
-                .queue_families
-                .iter()
-                .find(|qf| qf.supports_graphics() && surf.supports_queue_family(qf))
+            let queue_family = adapter.queue_families.iter().find(|qf| qf.supports_graphics() && surf.supports_queue_family(qf))
                 .ok_or("Couldn't find a QueueFamily with graphics!")?;
             let Gpu { device, mut queues } = unsafe {
-                adapter.physical_device
-                    .open(&[(&queue_family, &[1.0; 1])])
+                adapter.physical_device.open(&[(&queue_family, &[1.0; 1])])
                     .map_err(|_| "Couldn't open the PhysicalDevice!")?
             };
-            let queue_group = queues
-                .take::<Graphics>(queue_family.id())
+            let queue_group = queues.take::<Graphics>(queue_family.id())
                 .ok_or("Couldn't take ownership of the QueueGroup!")?;
-            let _ = if queue_group.queues.len() > 0 {
-                Ok(())
-            } else {
-                Err("The QueueGroup did not have any CommandQueues available!")
-            }?;
+            let _ = if queue_group.queues.len() > 0 { Ok(()) } else { Err("The QueueGroup did not have any CommandQueues available!") }?;
             (device, queue_group)
         };
         let (swapchain, extent, backbuffer, format, max_frames_in_flight) = {
@@ -155,7 +143,6 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             info!("Preferred Formats: {:?}", preferred_formats);
             info!("Present Modes: {:?}", present_modes);
             info!("Composite Alphas: {:?}", composite_alphas);
-            //
             let present_mode = {
                 use self::hal::window::PresentMode::*;
                 [Mailbox, Fifo, Relaxed, Immediate]
@@ -166,33 +153,23 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             };
             let composite_alpha = {
                 use self::hal::window::CompositeAlpha::*;
-                [Opaque, Inherit, PreMultiplied, PostMultiplied]
-                    .iter()
-                    .cloned()
-                    .find(|ca| composite_alphas.contains(ca))
-                    .ok_or("No CompositeAlpha values specified!")?
+                [Opaque, Inherit, PreMultiplied, PostMultiplied].iter().cloned().find(|ca| composite_alphas.contains(ca)).ok_or("No CompositeAlpha values specified!")?
             };
             let format = match preferred_formats {
                 None => Format::Rgba8Srgb,
-                Some(formats) => match formats
-                    .iter()
-                    .find(|format| format.base_format().1 == ChannelType::Srgb)
-                    .cloned()
-                {
+                Some(formats) => match formats.iter().find(|format| format.base_format().1 == ChannelType::Srgb).cloned() {
                     Some(srgb_format) => srgb_format,
                     None => formats.get(0).cloned().ok_or("Preferred format list was empty!")?,
                 },
             };
             let extent = {
-              let screen_sz = w
-                .get_inner_size()
-                .ok_or("Window doesn't exist!")?
-                .to_physical(w.get_hidpi_factor());
-              Extent2D {
-                width: caps.extents.end.width.min(screen_sz.width as u32),
-                height: caps.extents.end.height.min(screen_sz.height as u32),
-              }
+                let screen_sz = w.get_inner_size().ok_or("Window doesn't exist!")?.to_physical(w.get_hidpi_factor());
+                Extent2D {
+                    width: caps.extents.end.width.min(screen_sz.width as u32),
+                    height: caps.extents.end.height.min(screen_sz.height as u32),
+                }
             };
+            info!("Framebuffer target size: {:?}.", extent);
             let image_count = if present_mode == PresentMode::Mailbox {
                 (caps.image_count.end - 1).min(3)
             } else {
@@ -214,10 +191,8 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 image_usage,
             };
             info!("{:?}", swapchain_cfg);
-            //
             let (swapchain, backbuffer) = unsafe {
-                device
-                    .create_swapchain(&mut surf, swapchain_cfg, None)
+                device.create_swapchain(&mut surf, swapchain_cfg, None)
                     .map_err(|_| "Failed to create the swapchain!")?
             };
             (swapchain, extent, backbuffer, format, image_count as usize)
@@ -1199,15 +1174,19 @@ impl <I: Instance> RenderStage<I> {
         }, {
             match req_rx.try_recv() {
                 Ok(req) => if let RenderReq::Restart = req {
+                    info!("Recreating renderer!");
                     drop(r);
                     r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                    info!("Renderer recreated!");
                 } else {
                     match Renderer::handle_req(&mut r, req) {
                         Ok(_) => (),
                         Err(s) => {
+                            info!("Recreating renderer!");
                             error!("Error ({:?}) while handling request. Attempting recovery...", s);
                             drop(r);
                             r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                            info!("Renderer recreated!");
                         }
                     }
                 },

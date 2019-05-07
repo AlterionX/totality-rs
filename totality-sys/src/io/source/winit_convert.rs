@@ -75,17 +75,17 @@ impl super::IO for IO {
                  event: WindowEvent::Focused(f),
                  ..
              } =>  e::b::V(e::b::Flag::Focus.into(), e::b::State::DOWN).into(),
-             Event::DeviceEvent {
-                 event: DeviceEvent::Key(k),
+             Event::DeviceEvent { // Ignored since it's actually a duplicate of the below.
+                 event: DeviceEvent::Key(_),
                  ..
-             } => parse_keyboard(k),
-             Event::WindowEvent { // Ignored since it's actually a duplicate of the above.
+             } => e::V::Ignored,
+             Event::WindowEvent {
                  event: WindowEvent::KeyboardInput {
-                     input: _,
+                     input: k,
                      ..
                  },
                  ..
-             } => e::V::Ignored, //parse_keyboard(k),
+             } => parse_keyboard(k),
              Event::DeviceEvent {
                  event: DeviceEvent::Motion { .. },
                  ..
@@ -93,7 +93,7 @@ impl super::IO for IO {
              Event::DeviceEvent {
                  event: DeviceEvent::MouseMotion { delta: (x, y) },
                  ..
-             } => e::p::V::MouseDelta(e::p::DeltaState(na::Vector2::new(x as f32, y as f32))).into(),
+             } => e::V::Ignored,
              Event::WindowEvent {
                  event: WindowEvent::AxisMotion {
                      ..
@@ -104,9 +104,10 @@ impl super::IO for IO {
                  event: WindowEvent::ReceivedCharacter(_),
                  ..
              } => e::V::Ignored,
+             Event::Awakened => e::V::Ignored,
             _ => unimplemented!("Cannot cast {:?} to C.", e),
         };
-        trace!("Event translated to {:?}", v);
+        trace!("Event {:?} translated to {:?}", e, v);
         v
     }
 }

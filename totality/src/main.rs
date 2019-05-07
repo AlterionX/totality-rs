@@ -61,6 +61,8 @@ struct State {
     // graphics settings
     should_use_depth: Arc<Mutex<bool>>,
     settings_cb: Arc<Mutex<io::cb::CBFn>>,
+    should_restart_renderer: Arc<Mutex<bool>>,
+    window_change_cb: Arc<Mutex<io::cb::CBFn>>,
     // color flow
     color: Arc<Mutex<na::Vector4<f32>>>,
     color_changer: Arc<Mutex<io::cb::CBFn>>,
@@ -74,7 +76,7 @@ struct State {
 }
 impl State {
     fn new(cfg: Config) -> State {
-        let mut sm = io::Manager::new();
+        let sm = io::Manager::new();
         let c_tri0 = Arc::new(Box::new(geom::scene::TriGeom::new(
              na::Matrix3::new(
                  0.5, 0., -0.5,
@@ -136,6 +138,16 @@ impl State {
         };
         sm.reg_imm(b::C::F(b::Flag::Close).into(), cb_shutdown.clone());
         sm.reg_imm(b::C::S(b::Key::Esc).into(), cb_shutdown.clone());
+        let c_restart_render = Arc::new(Mutex::new(false));
+        let cb_win_chg = {
+            let c_restart_render = c_restart_render.clone();
+            cb_arc!("Screen Resize", v, s, {
+                if let V::P(p::V::ScreenSz(_)) = v {
+                    if let Ok(mut f) = c_restart_render.lock() { (*f) = true }
+                }
+            })
+        };
+        sm.reg_imm(p::C::ScreenSz.into(), cb_win_chg.clone());
         // set up settings flow
         let c_should_use_depth = Arc::new(Mutex::new(false));
         let cb_settings = {
@@ -179,7 +191,7 @@ impl State {
                         panic!("The library is wrong. It gave me {:?} when requesting for {:?}.", e, c);
                     }
                 } else {
-                    panic!("I received an event I never signed up for....");
+                    panic!("I received an event ({:?}) I never signed up for....", v);
                 }
             })
         };
@@ -252,6 +264,8 @@ impl State {
             // graphics settings
             should_use_depth: c_should_use_depth,
             settings_cb: cb_settings,
+            should_restart_renderer: c_restart_render,
+            window_change_cb: cb_win_chg,
             // color flow
             color: c_color,
             color_changer: cb_color,
@@ -330,6 +344,13 @@ impl State {
                     }
                 }
             };
+        }
+        if let Ok(mut srr_g) = self.should_restart_renderer.lock() {
+            if *srr_g {
+                info!("Sending recreate instruction!");
+                rs_ref.send_cmd(RenderReq::Restart).expect("No problems expected.");
+                *srr_g = false;
+            }
         }
         // Every <variable> invocations
         // TODO run cold logic

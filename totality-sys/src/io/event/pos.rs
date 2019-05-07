@@ -45,11 +45,11 @@ pub enum V {
 impl V {
     pub fn default_value_of(c: &C) -> Self {
         match c {
-            MousePos => V::MousePos(PosState(Vector2::new(0f32, 0f32))),
-            MouseDelta => V::MouseDelta(DeltaState(Vector2::new(0f32, 0f32))),
-            ScreenPos => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
-            ScreenSz => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
-            CursorPos => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
+            C::MousePos => V::MousePos(PosState(Vector2::new(0f32, 0f32))),
+            C::MouseDelta => V::MouseDelta(DeltaState(Vector2::new(0f32, 0f32))),
+            C::ScreenPos => V::ScreenPos(PosState(Vector2::new(0f32, 0f32))),
+            C::ScreenSz => V::ScreenSz(SzState(Vector2::new(0f32, 0f32))),
+            C::CursorPos => V::CursorPos(PosState(Vector2::new(0f32, 0f32))),
         }
     }
 }

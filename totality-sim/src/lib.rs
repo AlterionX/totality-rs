@@ -29,10 +29,10 @@ impl Simulation {
     }
     pub fn step(&mut self) {
         let step = Self::dur_as_f64(&self.time_step) as f32;
-        info!("Step: {:?}", step);
+        trace!("Step: {:?}", step);
         // call pre
         // simulate
-        let opt = if let Ok(mut k) = self.scene.read() {
+        let opt = if let Ok(k) = self.scene.read() {
             if let Some(ref sc) = *k {
                 Some(sc.advance())
             } else { None }
