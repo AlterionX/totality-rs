@@ -5,4 +5,6 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+quick-xml = "0.14.0"
+lazy_static = "1.3.0"
 
