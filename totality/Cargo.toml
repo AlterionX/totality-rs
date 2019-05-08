@@ -5,10 +5,14 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-totality-sys = { path = "../totality-sys" }
+# Own, intermediary dependents
+totality-render = { path = "../totality-render" }
 totality-sim = { path = "../totality-sim" }
-totality-threading = { path = "../totality-threading" }
+# Own, base independents
+totality-io = { path = "../totality-io" }
 totality-model = { path = "../totality-model" }
+totality-threading = { path = "../totality-threading" }
+# imports
 gfx-hal = "0.1.0"
 winit = "0.18.1"
 nalgebra = "0.18"
@@ -20,23 +24,4 @@ simple_logger = "1.0"
 arrayvec = "0.4.10"
 syn = "0.15.32"
 quote = "0.6"
-
-[dependencies.gfx-backend-vulkan]
-version = "0.1"
-optional = true
-
-[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
-version = "0.1"
-optional = true
-
-[target.'cfg(windows)'.dependencies.gfx-backend-dx12]
-version = "0.1"
-optional = true
-
-[features]
-default = ["vulkan"]
-metal = ["gfx-backend-metal"]
-dx12 = ["gfx-backend-dx12"]
-vulkan = ["gfx-backend-vulkan"]
-unstable = []
 

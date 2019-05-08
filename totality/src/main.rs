@@ -4,7 +4,8 @@ extern crate winit;
 extern crate simple_logger;
 extern crate log;
 extern crate arrayvec as av;
-extern crate totality_sys as sys;
+extern crate totality_render as sys;
+extern crate totality_io as io;
 extern crate totality_sim as sim;
 extern crate totality_threading as th;
 extern crate totality_model as geom;
@@ -18,7 +19,8 @@ use std::{
 
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
-use sys::{cb_arc, io::{self, e::{C, V, a, p, b}}, renderer::{IT, Color, TypedRenderReq, RenderReq, TypedRenderStage, RenderSettings}};
+use io::{cb_arc, e::{C, V, a, p, b}};
+use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
 
@@ -142,8 +144,13 @@ impl State {
         let cb_win_chg = {
             let c_restart_render = c_restart_render.clone();
             cb_arc!("Screen Resize", v, s, {
-                if let V::P(p::V::ScreenSz(_)) = v {
-                    if let Ok(mut f) = c_restart_render.lock() { (*f) = true }
+                if let V::P(p::V::ScreenSz(p::SzState(p))) = v {
+                    let c = C::P(p::C::ScreenSz);
+                    if let V::P(p::V::ScreenSz(p::SzState(p_prev))) = s.get(&c) {
+                        if (p_prev - p).norm() > 1e-7 {
+                            if let Ok(mut f) = c_restart_render.lock() { (*f) = true }
+                        }
+                    }
                 }
             })
         };
@@ -358,7 +365,7 @@ impl State {
         // TODO query system state
         (*self.current_action.lock().unwrap()).clone()
     }
-    fn cleanup(mut self) -> (sys::io::FinishResult, sys::renderer::FinishResult, sim::FinishResult) {
+    fn cleanup(mut self) -> (io::FinishResult, sys::FinishResult, sim::FinishResult) {
         // TODO change to let chaining once available
         ({
             info!("Shutting down system management.");

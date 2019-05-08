@@ -22,12 +22,23 @@ extern crate gfx_backend_metal as back;
 extern crate gfx_backend_vulkan as back;
 
 extern crate gfx_hal as hal;
+extern crate totality_threading as th;
+extern crate totality_model as model;
+extern crate arrayvec as av;
+extern crate nalgebra as na;
 extern crate image as img;
 
 mod shaders;
 mod buffers;
 mod texture;
 
+use std::{
+    ops::DerefMut,
+    time::SystemTime,
+    sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, SendError}},
+    mem::{size_of, ManuallyDrop},
+    ptr::read,
+};
 use self::hal::{
     *,
     format::*,
@@ -38,18 +49,11 @@ use self::hal::{
     command::*,
     pso::*,
 };
-use super::av::ArrayVec;
-use std::{
-    ops::DerefMut,
-    time::SystemTime,
-    sync::{Arc, Mutex, RwLock, mpsc::{Sender, Receiver, channel, SendError}},
-    mem::{size_of, ManuallyDrop},
-    ptr::read,
-};
-use super::na::Vector4;
+use av::ArrayVec;
+use na::Vector4;
 use winit::Window;
-use super::kt::KillableThread;
-use super::geom::{self, scene::Scene};
+use th::killable_thread::{self as kt, KillableThread};
+use model::{self as geom, scene::Scene};
 use buffers::{AllocatedBuffer, LoadedBuffer};
 use shaders::{ShaderInfo, CompiledShader};
 use texture::LoadedImage;
@@ -57,8 +61,8 @@ use texture::LoadedImage;
 #[allow(dead_code)]
 use log::{error, warn, info, debug, trace};
 
-const VERTEX_SOURCE: &str = include_str!("../../resources/shaders/basic.vert");
-const FRAGMENT_SOURCE: &str =  include_str!("../../resources/shaders/basic.frag");
+const VERTEX_SOURCE: &str = include_str!("../resources/shaders/basic.vert");
+const FRAGMENT_SOURCE: &str =  include_str!("../resources/shaders/basic.frag");
 
 pub trait RendererCreator<I: Instance>: Fn(&Window) -> Result<Renderer<I>, &'static str> + Send + 'static {}
 impl <F: Fn(&Window) -> Result<Renderer<I>, &'static str> + Send + 'static, I: Instance> RendererCreator<I> for F {}
@@ -1208,7 +1212,7 @@ impl <I: Instance> RenderStage<I> {
         self.render_thread.take().map_or_else(|| Option::None, |kt| kt.finish())
     }
 }
-pub type FinishResult = super::kt::FinishResult<()>;
+pub type FinishResult = kt::FinishResult<()>;
 impl <I: Instance> Drop for RenderStage<I> {
     fn drop(&mut self) {
         if self.render_thread.is_some() {

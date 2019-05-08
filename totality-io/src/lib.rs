@@ -1,21 +1,29 @@
+extern crate totality_threading as th;
+extern crate nalgebra as na;
+extern crate winit;
+extern crate log;
+
+// exports
 pub mod event;
 pub mod cb;
 mod source;
-
 pub use self::event as e;
-pub use self::source::WindowSpecs;
-use self::source::IO;
-use super::th::killable_thread::KillableThread;
 
+// std dependencies
 use std::{
     option::Option,
     sync::{
         Arc, Mutex, Weak,
-        mpsc::{channel, TryRecvError, Sender, Receiver, RecvError, SendError},
+        mpsc::{channel, Sender, Receiver, RecvError, SendError},
     },
     result::Result,
-    time::{Instant, Duration},
 };
+// internal dependencies
+use self::source::WindowSpecs;
+use self::source::IO;
+// workspace internal dependencies
+use th::killable_thread::{self as kt, KillableThread};
+// external dependencies
 use winit::Window;
 use self::e::*;
 
@@ -92,6 +100,7 @@ impl Manager {
                 Ok(mut s_mg) => {
                     io.next_events(&mut vv);
                     // if vv.len() != 0 { man.fire_and_clean_listing(&mut *s_mg, &mut vv); }
+                    // TODO change to update state per event
                     man.fire_and_clean_listing(&mut *s_mg, &mut vv);
                     for v in vv.drain(..) {
                         (*s_mg).update(&v);
@@ -186,12 +195,68 @@ impl Manager {
         self.pollers.take().map(|pollers| pollers.map(|p| p.finish()).as_tup())
     }
 }
-pub type FinishResult = Option<(super::kt::FinishResult<()>, super::kt::FinishResult<()>)>;
+pub type FinishResult = Option<(kt::FinishResult<()>, kt::FinishResult<()>)>;
 impl Drop for Manager {
     fn drop(&mut self) {
         if let Some(_) = self.pollers {
             panic!("Finish must be called on Manager before it can be dropped.")
         }
     }
+}
+
+#[macro_export]
+macro_rules! cb_arc {
+    ( $name:literal, $v:ident, $s:ident, $l_t:ident, $c_t:ident, {$($head:tt)*} ) => {
+        {
+            use log::trace;
+            let arc = std::sync::Arc::new(std::sync::Mutex::new(
+                move |$s: &$crate::e::State, $v: &$crate::e::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
+                    trace!("{} handler fired with {:?}", $name, $v);
+                    $($head)*;
+                    trace!("{} handler completed.", $name);
+                }
+            ));
+            arc
+        }
+    };
+    ( $name:literal, $v:ident, $s:ident, {$($head:tt)*} ) => {
+        {
+            use log::trace;
+            let arc = std::sync::Arc::new(std::sync::Mutex::new(
+                move |$s: &$crate::e::State, $v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
+                    trace!("{} handler fired with {:?}", $name, $v);
+                    $($head)*;
+                    trace!("{} handler completed.", $name);
+                }
+            ));
+            arc
+        }
+    };
+    ( $name:literal, $s:ident, {$($head:tt)*} ) => {
+        {
+            use log::trace;
+            let arc = std::sync::Arc::new(std::sync::Mutex::new(
+                move |$s: &$crate::e::State, v: &$crate::e::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
+                    trace!("{} handler fired with {:?}", $name, v);
+                    $($head)*;
+                    trace!("{} handler completed.", $name);
+                }
+            ));
+            arc
+        }
+    };
+    ( $name:literal, {$($head:tt)*} ) => {
+        {
+            use log::trace;
+            let arc = std::sync::Arc::new(std::sync::Mutex::new(
+                move |_: &$crate::e::State, v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
+                    trace!("{} handler fired with {:?}", $name, v);
+                    $($head)*;
+                    trace!("{} handler completed.", $name);
+                }
+            ));
+            arc
+        }
+    };
 }
 

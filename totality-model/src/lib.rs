@@ -1,3 +1,4 @@
+extern crate totality_sync as sync;
 extern crate nalgebra as na;
 extern crate arrayvec as av;
 extern crate log;
