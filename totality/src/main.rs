@@ -8,6 +8,7 @@ extern crate totality_render as sys;
 extern crate totality_io as io;
 extern crate totality_sim as sim;
 extern crate totality_threading as th;
+extern crate totality_hal_events as e;
 extern crate totality_model as geom;
 
 use std::{
@@ -19,7 +20,8 @@ use std::{
 
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
-use io::{cb_arc, e::{C, V, a, p, b}};
+use io::cb_arc;
+use e::{C, V, a, p, b};
 use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
@@ -202,7 +204,7 @@ impl State {
                 }
             })
         };
-        sm.reg_per(io::e::p::C::CursorPos.into(), cb_color.clone());
+        sm.reg_per(p::C::CursorPos.into(), cb_color.clone());
         let cam = Arc::new(Mutex::new(geom::camera::Camera::Perspective(geom::camera::PerspectiveCamera::default())));
         let cb_mover = {
             let cam = cam.clone();

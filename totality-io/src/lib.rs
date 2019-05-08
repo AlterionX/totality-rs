@@ -1,13 +1,14 @@
 extern crate totality_threading as th;
+pub extern crate totality_hal_events as events;
 extern crate nalgebra as na;
 extern crate winit;
 extern crate log;
 
 // exports
-pub mod event;
 pub mod cb;
 mod source;
-pub use self::event as e;
+
+use events as e;
 
 // std dependencies
 use std::{
@@ -210,7 +211,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::e::State, $v: &$crate::e::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
+                move |$s: &$crate::events::State, $v: &$crate::events::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -223,7 +224,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::e::State, $v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
+                move |$s: &$crate::events::State, $v: &$crate::events::V, _: &std::time::Instant, _: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -236,7 +237,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::e::State, v: &$crate::e::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
+                move |$s: &$crate::events::State, v: &$crate::events::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -249,7 +250,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |_: &$crate::e::State, v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
+                move |_: &$crate::events::State, v: &$crate::events::V, _: &std::time::Instant, _: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
                     trace!("{} handler completed.", $name);

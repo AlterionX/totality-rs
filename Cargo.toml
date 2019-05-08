@@ -5,9 +5,9 @@ members = [
     "totality-gui",         # gui library independent of totality-render, but is able to be tightly integrated with it
     "totality-render",      # renderer, attach a separate backend later on for ray-traced version
     "totality-sim",         # physics sim, extensible with any update function
-    # only dependent on threading
     "totality-io",          # io, since it's needed by gui + other things
     # Technically wholly independent, but designed to be used together
+    "totality-hal-events",  # to place a few sync primitives beyond the standard library
     "totality-sync",        # to place a few sync primitives beyond the standard library
     "totality-model",       # loader + combiner for data models for io, render, and physics
     "totality-threading",   # threading

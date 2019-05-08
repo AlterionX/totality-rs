@@ -1196,6 +1196,7 @@ dependencies = [
  "quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "simple_logger 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)",
+ "totality-hal-events 0.1.0",
  "totality-io 0.1.0",
  "totality-model 0.1.0",
  "totality-render 0.1.0",
@@ -1210,6 +1211,18 @@ version = "0.1.0"
 dependencies = [
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "quick-xml 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "totality-hal-events 0.1.0",
+ "totality-model 0.1.0",
+]
+
+[[package]]
+name = "totality-hal-events"
+version = "0.1.0"
+dependencies = [
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "simple_logger 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winit 0.18.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1219,6 +1232,7 @@ dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "simple_logger 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "totality-hal-events 0.1.0",
  "totality-threading 0.1.0",
  "winit 0.18.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

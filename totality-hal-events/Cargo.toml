@@ -1,14 +1,10 @@
 [package]
-name = "totality-io"
+name = "totality-hal-events"
 version = "0.1.0"
 authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-# Own, base independents
-totality-threading = { path = "../totality-threading" }
-totality-hal-events = { path = "../totality-hal-events" }
-# imports
 winit = "0.18.1"
 nalgebra = "0.18"
 log = "0.4.0"

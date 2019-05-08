@@ -3,8 +3,10 @@
 #[macro_use]
 extern crate lazy_static;
 
+extern crate totality_model as geom;
+
 pub mod color;
-pub mod event;
+mod event;
 use event as e;
 use color::Color;
 
@@ -110,12 +112,16 @@ pub trait Drawer {
 
 pub struct Core {
     drawing_area: Sz,
+    world_placement: geom::Model,
+    cam: geom::camera::Camera,
     root: Rc<Box<RootComponent>>,
     drawer: Drawer,
 }
 impl Core {
     fn launch(&self) -> ! {
         loop {
+            // pull events
+            // reinterpret events as gui actions
         }
         // TODO exit the gui
     }

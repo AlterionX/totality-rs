@@ -8,8 +8,9 @@ edition = "2018"
 # Own, intermediary dependents
 totality-render = { path = "../totality-render" }
 totality-sim = { path = "../totality-sim" }
-# Own, base independents
 totality-io = { path = "../totality-io" }
+# Own, base independents
+totality-hal-events = { path = "../totality-hal-events" }
 totality-model = { path = "../totality-model" }
 totality-threading = { path = "../totality-threading" }
 # imports

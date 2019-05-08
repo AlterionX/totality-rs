@@ -1,3 +1,6 @@
+extern crate nalgebra as na;
+extern crate winit;
+
 pub mod change;
 pub mod axis;
 pub mod pos;
