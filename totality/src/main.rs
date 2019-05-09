@@ -1,15 +1,13 @@
 extern crate nalgebra as na;
-extern crate image as img;
-extern crate winit;
 extern crate simple_logger;
 extern crate log;
-extern crate arrayvec as av;
+
 extern crate totality_render as sys;
-extern crate totality_io as io;
 extern crate totality_sim as sim;
-extern crate totality_threading as th;
+extern crate totality_io as io;
 extern crate totality_hal_events as e;
 extern crate totality_model as geom;
+extern crate totality_threading as th;
 
 use std::{
     option::Option,
@@ -17,12 +15,12 @@ use std::{
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant}
 };
-
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
 use io::cb_arc;
 use e::{C, V, a, p, b};
 use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
+
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
 

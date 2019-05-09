@@ -9,4 +9,5 @@ totality-hal-events = { path = "../totality-hal-events" }
 totality-model = { path = "../totality-model" }
 quick-xml = "0.14.0"
 lazy_static = "1.3.0"
+log = "0.4.6"
 

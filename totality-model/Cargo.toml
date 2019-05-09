@@ -6,10 +6,6 @@ edition = "2018"
 
 [dependencies]
 totality-sync = { path = "../totality-sync" }
-nalgebra = "0.18"
-log = "0.4.0"
-simple_logger = "1.0"
-arrayvec = "0.4.10"
-syn = "0.15.32"
-quote = "0.6"
+nalgebra = "0.18.0"
+log = "0.4.6"
 

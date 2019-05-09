@@ -10,7 +10,6 @@ totality-threading = { path = "../totality-threading" }
 totality-hal-events = { path = "../totality-hal-events" }
 # imports
 winit = "0.18.1"
-nalgebra = "0.18"
-log = "0.4.0"
-simple_logger = "1.0"
+nalgebra = "0.18.0"
+log = "0.4.6"
 

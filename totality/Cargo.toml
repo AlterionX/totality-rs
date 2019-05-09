@@ -14,15 +14,8 @@ totality-hal-events = { path = "../totality-hal-events" }
 totality-model = { path = "../totality-model" }
 totality-threading = { path = "../totality-threading" }
 # imports
-gfx-hal = "0.1.0"
-winit = "0.18.1"
-nalgebra = "0.18"
-num_cpus = "1.0"
-image = "*"
-crossbeam = "0.5"
-log = "0.4.0"
-simple_logger = "1.0"
+nalgebra = "0.18.0"
+log = "0.4.6"
+simple_logger = "1.0.1"
 arrayvec = "0.4.10"
-syn = "0.15.32"
-quote = "0.6"
 

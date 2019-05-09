@@ -5,5 +5,5 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-log = "0.4.0"
+log = "0.4.6"
 

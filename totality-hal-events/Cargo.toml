@@ -5,8 +5,6 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-winit = "0.18.1"
-nalgebra = "0.18"
-log = "0.4.0"
-simple_logger = "1.0"
+nalgebra = "0.18.0"
+log = "0.4.6"
 

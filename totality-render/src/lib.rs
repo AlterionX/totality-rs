@@ -76,6 +76,7 @@ pub enum RenderReq<I: Instance> {
     Restart,
     Clear(Color),
     Seq(Vec<RenderReq<I>>),
+    DrawDirect(geom::Model, geom::camera::Camera, Color),
     Draw(geom::Model, geom::camera::Camera, Color),
     DrawGroup(Vec<geom::Model>, geom::camera::Camera, Color),
     DrawGroupWithSetting(Vec<geom::Model>, geom::camera::Camera, Color, RenderSettings),
@@ -1059,6 +1060,9 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 .map_err(|_| "Failed to present into the swapchain!")
         }
     }
+    fn draw_geom_direct(&mut self, m: geom::Model, cam: geom::camera::Camera) -> Result<(), &'static str> {
+        unimplemented!();
+    }
     fn as_buffer(v: &[f32; 4]) -> [u32; 4] {
         let mut av: [u32; 4] = unsafe { std::mem::uninitialized() };
         for (i, seg) in v.iter().enumerate() {
@@ -1070,6 +1074,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         match q {
             RenderReq::Clear(Color(c)) => r.clear_color(c),
             RenderReq::Draw(m, cam, Color(c)) => r.draw_instanced_geom(vec![m], cam, c),
+            RenderReq::DrawDirect(m, cam, _) => r.draw_geom_direct(m, cam),
             RenderReq::DrawGroup(mm, cam, Color(c)) => r.draw_instanced_geom(mm, cam, c),
             RenderReq::DrawGroupWithSetting(mm, cam, Color(c), settings) => {
                 if settings.should_use_depth {
