@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 # Own, base independents
 totality-threading = { path = "../totality-threading" }
-totality-hal-events = { path = "../totality-hal-events" }
+totality-events = { path = "../totality-events" }
 # imports
 winit = "0.19.1"
 nalgebra = "0.18.0"

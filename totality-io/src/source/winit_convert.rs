@@ -2,13 +2,16 @@ use std::{
     sync::mpsc::{channel, Receiver},
     cell::RefCell,
 };
+
+use internal_events::hal as e;
+use super::WindowSpecs;
+
 use winit::{
     Event, EventsLoop, ControlFlow, WindowEvent, DeviceEvent,
     KeyboardInput, VirtualKeyCode, ScanCode,
     WindowBuilder,
     dpi::*,
 };
-use super::*;
 use log::{debug, trace};
 
 pub type Window = winit::Window;

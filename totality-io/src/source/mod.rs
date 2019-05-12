@@ -1,7 +1,7 @@
 pub mod winit_convert;
 pub use self::winit_convert as back;
 
-use events as e;
+use internal_events::hal as e;
 
 #[derive(Debug, Copy, Clone)]
 pub struct WindowSpecs {

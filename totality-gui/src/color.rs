@@ -179,6 +179,8 @@ lazy_static! {
     pub static ref SLATE_GRAY: Color = Color::hex_bb(b"#708090").expect("SLATE_GRAY color parse error.");
     pub static ref DARK_SLATE_GRAY: Color = Color::hex_bb(b"#2f4f4f").expect("DARK_SLATE_GRAY color parse error.");
     pub static ref BLACK: Color = Color::hex_bb(b"#000000").expect("BLACK color parse error.");
+    // utility
+    pub static ref TRANSPARENT: Color = Color::hex_bb(b"#00000000").expect("TRANSPARENT color parse error.");
 }
 impl Color {
     pub const MIN: u8 = 0;

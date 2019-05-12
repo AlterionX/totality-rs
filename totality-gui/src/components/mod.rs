@@ -6,6 +6,8 @@ use crate::Background;
 use crate::draw::DrawCmd;
 use crate::layout::{Placer};
 
+pub mod text_box;
+
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ShouldHaltPropagation(bool);
 impl ShouldHaltPropagation {
@@ -27,10 +29,9 @@ enum IterMode {
 }
 pub trait Component {
     // Mostly preset data
-    fn min_sz(&self) -> Sz;
-    fn max_sz(&self) -> Sz;
-    fn preferred_sz(&self) -> Sz;
-    fn id(&self) -> Id;
+    fn min_sz(&self) -> Option<Sz>;
+    fn max_sz(&self) -> Option<Sz>;
+    fn preferred_sz(&self) -> Option<Sz>;
     fn bg(&self) -> Background;
     fn placer(&self) -> &Box<Placer>;
     fn parent(&self) -> &Id;
@@ -43,6 +44,14 @@ pub trait Component {
     // draw
     fn need_redraw(&self) -> bool;
     fn draw(&self) -> Vec<DrawCmd>;
+}
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct SizingInfo {
+    min: Option<Sz>,
+    max: Option<Sz>,
+    preferred: Option<Sz>,
+}
+impl SizingInfo {
 }
 
 fn iter(root: &Id, mode: IterMode, f: &Fn(&Component)) {

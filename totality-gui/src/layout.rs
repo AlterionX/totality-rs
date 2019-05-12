@@ -50,10 +50,11 @@ pub trait Placer {
     fn place(&self, comp: &Vec<Rc<Box<Component>>>, sz: Sz) -> Vec<Cfg>;
 }
 
-struct LiteralPlacer {
+pub struct LiteralPlacer {
     cfgs: Vec<Cfg>
 }
 impl LiteralPlacer {
+    pub fn new() -> Self { Self { cfgs: vec![] } }
     pub fn set_placements(&mut self, mut cfgs: Vec<Cfg>) {
         std::mem::swap(&mut self.cfgs, &mut cfgs);
     }

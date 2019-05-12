@@ -1,14 +1,14 @@
 extern crate totality_threading as th;
-pub extern crate totality_hal_events as events;
+extern crate totality_events as internal_events;
 extern crate nalgebra as na;
 extern crate winit;
 extern crate log;
 
 // exports
-pub mod cb;
 mod source;
 
-use events as e;
+use internal_events::cb;
+pub use internal_events::hal as e;
 
 // std dependencies
 use std::{
@@ -26,7 +26,7 @@ use self::source::IO;
 use th::killable_thread::{self as kt, KillableThread};
 // external dependencies
 use winit::Window;
-use self::e::*;
+use e::*;
 
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
@@ -56,8 +56,11 @@ pub enum RegErr<T> {
     Recv(RecvError),
 }
 
+pub type CBFn = cb::CBFn<State, V, C>;
+pub type CB = cb::CB<State, V, C>;
+
 pub struct Manager {
-    registrar: Twinned<Mutex<(Sender<cb::RegRequest>, Receiver<cb::RegResponse>)>>, // triggered periodically
+    registrar: Twinned<Mutex<(Sender<cb::RegRequest<State, V, C>>, Receiver<cb::RegResponse<State, V, C>>)>>, // triggered periodically
     pollers: Option<Twinned<KillableThread<()>>>, // thread handle of polling thread
     pub win: Arc<self::source::back::Window>, // output is just this part
 }
@@ -67,8 +70,8 @@ impl Manager {
         s_m: Arc<Mutex<e::State>>,
         // window creation needs to happen here
         win_tx: Sender<Window>,
-        req_rx: Receiver<cb::RegRequest>,
-        res_tx: Sender<cb::RegResponse>,
+        req_rx: Receiver<cb::RegRequest<State, V, C>>,
+        res_tx: Sender<cb::RegResponse<State, V, C>>,
     ) -> KillableThread<()> {
         th::create_kt!((), "Immediate Event Loop", {
             let mut man = cb::Manager::new();
@@ -114,8 +117,8 @@ impl Manager {
     #[inline(always)]
     fn start_periodic_thread(
         s_m: Arc<Mutex<State>>,
-        req_rx: Receiver<cb::RegRequest>,
-        res_tx: Sender<cb::RegResponse>,
+        req_rx: Receiver<cb::RegRequest<State, V, C>>,
+        res_tx: Sender<cb::RegResponse<State, V, C>>,
     ) -> KillableThread<()> {
         th::create_kt!((), "Periodic Event Loop", {
             let mut man = cb::Manager::new();
@@ -163,21 +166,21 @@ impl Manager {
             win: Arc::new(win_rx.recv().unwrap()),
         }
     }
-    pub fn reg_imm<F>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> where F: cb::CBFn {
+    pub fn reg_imm<F: cb::CBFn<State, V, C>>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse<State, V, C>, RegErr<cb::RegRequest<State, V, C>>> {
         let cb = Arc::downgrade(&f);
         Self::send_to_manager(&self.registrar.imm, cb::RegRequest::Register(c, vec![cb::CB::new(c, cb)]))
     }
-    pub fn reg_per<F>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> where F: cb::CBFn {
+    pub fn reg_per<F: cb::CBFn<State, V, C>>(&self, c: C, f: Arc<Mutex<F>>) -> Result<cb::RegResponse<State, V, C>, RegErr<cb::RegRequest<State, V, C>>> {
         let cb = Arc::downgrade(&f);
         Self::send_to_manager(&self.registrar.per, cb::RegRequest::Register(c, vec![cb::CB::new(c, cb)]))
     }
-    pub fn unreg_imm(&self, cb: Weak<Mutex<cb::CB>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> {
+    pub fn unreg_imm(&self, cb: Weak<Mutex<cb::CB<State, V, C>>>) -> Result<cb::RegResponse<State, V, C>, RegErr<cb::RegRequest<State, V, C>>> {
         Self::send_to_manager(&self.registrar.imm, cb::RegRequest::Unregister(vec![cb]))
     }
-    pub fn unreg_per(&self, cb: Weak<Mutex<cb::CB>>) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> {
+    pub fn unreg_per(&self, cb: Weak<Mutex<cb::CB<State, V, C>>>) -> Result<cb::RegResponse<State, V, C>, RegErr<cb::RegRequest<State, V, C>>> {
         Self::send_to_manager(&self.registrar.per, cb::RegRequest::Unregister(vec![cb]))
     }
-    fn send_to_manager(trx: &Mutex<(Sender<cb::RegRequest>, Receiver<cb::RegResponse>)>, req: cb::RegRequest) -> Result<cb::RegResponse, RegErr<cb::RegRequest>> {
+    fn send_to_manager(trx: &Mutex<(Sender<cb::RegRequest<State, V, C>>, Receiver<cb::RegResponse<State, V, C>>)>, req: cb::RegRequest<State, V, C>) -> Result<cb::RegResponse<State, V, C>, RegErr<cb::RegRequest<State, V, C>>> {
         match trx.lock() {
             Ok(guard) => {
                 let (ref tx, ref rx) = *guard;
@@ -211,7 +214,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::events::State, $v: &$crate::events::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
+                move |$s: &$crate::e::State, $v: &$crate::e::V, $l_t: &std::time::Instant, $c_t: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -224,7 +227,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::events::State, $v: &$crate::events::V, _: &std::time::Instant, _: &std::time::Instant| {
+                move |$s: &$crate::e::State, $v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, $v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -237,7 +240,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |$s: &$crate::events::State, v: &$crate::events::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
+                move |$s: &$crate::e::State, v: &$crate::e::V, l_t: &std::time::Instant, c_t: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
                     trace!("{} handler completed.", $name);
@@ -250,7 +253,7 @@ macro_rules! cb_arc {
         {
             use log::trace;
             let arc = std::sync::Arc::new(std::sync::Mutex::new(
-                move |_: &$crate::events::State, v: &$crate::events::V, _: &std::time::Instant, _: &std::time::Instant| {
+                move |_: &$crate::e::State, v: &$crate::e::V, _: &std::time::Instant, _: &std::time::Instant| {
                     trace!("{} handler fired with {:?}", $name, v);
                     $($head)*;
                     trace!("{} handler completed.", $name);

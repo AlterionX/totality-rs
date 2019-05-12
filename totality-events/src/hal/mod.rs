@@ -1,5 +1,3 @@
-extern crate nalgebra as na;
-
 pub mod change;
 pub mod axis;
 pub mod pos;
@@ -10,6 +8,7 @@ pub use self::pos as p;
 pub use self::button as b;
 
 use std::collections::HashMap;
+use crate::cb::{Categorized, ValueStore};
 
 #[derive(Debug, Hash, Copy, Clone, PartialEq, Eq)]
 pub enum C {
@@ -68,6 +67,11 @@ pub enum V {
     Ignored,
     Unknown,
 }
+impl Categorized<C> for V {
+    fn category(&self) -> C {
+        C::from(self)
+    }
+}
 
 #[derive(Default)]
 pub struct State {
@@ -95,7 +99,9 @@ impl State {
             }
         }
     }
-    pub fn get(&self, c: &C) -> V {
+}
+impl ValueStore<C, V> for State {
+    fn get(&self, c: &C) -> V {
         match self.m.get(c) {
             Some(v) => v.clone(),
             None => c.default_v(),

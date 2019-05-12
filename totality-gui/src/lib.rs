@@ -6,9 +6,9 @@ extern crate lazy_static;
 extern crate totality_model as geom;
 
 pub mod color;
-mod draw;
-mod event;
-mod components;
+pub mod draw;
+pub mod event;
+pub mod components;
 mod layout;
 use event as e;
 use color::Color;

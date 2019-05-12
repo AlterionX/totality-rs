@@ -5,7 +5,7 @@ extern crate log;
 extern crate totality_render as sys;
 extern crate totality_sim as sim;
 extern crate totality_io as io;
-extern crate totality_hal_events as e;
+extern crate totality_events as events;
 extern crate totality_model as geom;
 extern crate totality_threading as th;
 
@@ -18,6 +18,8 @@ use std::{
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
 use io::cb_arc;
+use events::cb::ValueStore;
+use events::hal as e;
 use e::{C, V, a, p, b};
 use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
 
@@ -58,23 +60,23 @@ struct State {
     sim: Option<sim::SimulationManager>,
     c: Config,
     // shutdown flow
-    shutdown: Arc<Mutex<io::cb::CBFn>>,
+    shutdown: Arc<Mutex<io::CBFn>>,
     current_action: Arc<Mutex<Action>>,
     // graphics settings
     should_use_depth: Arc<Mutex<bool>>,
-    settings_cb: Arc<Mutex<io::cb::CBFn>>,
+    settings_cb: Arc<Mutex<io::CBFn>>,
     should_restart_renderer: Arc<Mutex<bool>>,
-    window_change_cb: Arc<Mutex<io::cb::CBFn>>,
+    window_change_cb: Arc<Mutex<io::CBFn>>,
     // color flow
     color: Arc<Mutex<na::Vector4<f32>>>,
-    color_changer: Arc<Mutex<io::cb::CBFn>>,
+    color_changer: Arc<Mutex<io::CBFn>>,
     // fish selection
     fish: Arc<Mutex<i32>>,
-    change_fish: Arc<Mutex<io::cb::CBFn>>,
+    change_fish: Arc<Mutex<io::CBFn>>,
     // camera stuffs
     camera: Arc<Mutex<geom::camera::Camera>>,
-    camera_mover: Arc<Mutex<io::cb::CBFn>>,
-    camera_roter: Arc<Mutex<io::cb::CBFn>>,
+    camera_mover: Arc<Mutex<io::CBFn>>,
+    camera_roter: Arc<Mutex<io::CBFn>>,
 }
 impl State {
     fn new(cfg: Config) -> State {

@@ -7,7 +7,7 @@ members = [
     "totality-sim",         # physics sim, extensible with any update function
     "totality-io",          # io, since it's needed by gui + other things
     # Technically wholly independent, but designed to be used together
-    "totality-hal-events",  # to place a few sync primitives beyond the standard library
+    "totality-events",      # Eventing system + hal for mouse, keyboard, etc
     "totality-sync",        # to place a few sync primitives beyond the standard library
     "totality-model",       # loader + combiner for data models for io, render, and physics
     "totality-threading",   # threading

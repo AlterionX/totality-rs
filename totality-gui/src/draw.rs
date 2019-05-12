@@ -1,8 +1,8 @@
 use crate::layout::Sz;
 
-pub enum DrawCmd<'a> {
+pub enum DrawCmd {
     // TODO abstract out 2d draw commands a gui needs
-    Text(&'a str, &'a Sz), Background(),
+    Text(String, Sz), Background(),
 }
 
 pub trait Drawer {

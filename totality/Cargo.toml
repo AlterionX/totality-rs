@@ -10,7 +10,7 @@ totality-render = { path = "../totality-render" }
 totality-sim = { path = "../totality-sim" }
 totality-io = { path = "../totality-io" }
 # Own, base independents
-totality-hal-events = { path = "../totality-hal-events" }
+totality-events = { path = "../totality-events" }
 totality-model = { path = "../totality-model" }
 totality-threading = { path = "../totality-threading" }
 # imports
