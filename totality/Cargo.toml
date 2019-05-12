@@ -16,6 +16,6 @@ totality-threading = { path = "../totality-threading" }
 # imports
 nalgebra = "0.18.0"
 log = "0.4.6"
-simple_logger = "1.0.1"
+simple_logger = "1.2.0"
 arrayvec = "0.4.10"
 

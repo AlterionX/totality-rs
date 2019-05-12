@@ -38,7 +38,7 @@ impl<B: Backend<Device=D>, D: Device<B>> DepthImage<B> {
         .create_image(
           gfx_hal::image::Kind::D2(extent.width, extent.height, 1, 1),
           1,
-          Format::D32Float,
+          Format::D32Sfloat,
           gfx_hal::image::Tiling::Optimal,
           gfx_hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
           gfx_hal::image::ViewCapabilities::empty(),
@@ -68,7 +68,7 @@ impl<B: Backend<Device=D>, D: Device<B>> DepthImage<B> {
         .create_image_view(
           &the_image,
           gfx_hal::image::ViewKind::D2,
-          Format::D32Float,
+          Format::D32Sfloat,
           gfx_hal::format::Swizzle::NO,
           SubresourceRange {
             aspects: Aspects::DEPTH,
@@ -116,7 +116,7 @@ impl <B: Backend> LoadedImage<B> {
             let pixel_size = size_of::<img::Rgba<u8>>();
             let row_size = pixel_size * (img.width() as usize);
             let limits = adapter.physical_device.limits();
-            let row_alignment_mask = limits.min_buffer_copy_pitch_alignment as u32 - 1;
+            let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
             let row_pitch = ((row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
             debug_assert!(row_pitch as usize >= row_size);
             // 1. make a staging buffer with enough memory for the image, and a

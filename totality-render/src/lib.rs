@@ -134,7 +134,8 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             let queue_family = adapter.queue_families.iter().find(|qf| qf.supports_graphics() && surf.supports_queue_family(qf))
                 .ok_or("Couldn't find a QueueFamily with graphics!")?;
             let Gpu { device, mut queues } = unsafe {
-                adapter.physical_device.open(&[(&queue_family, &[1.0; 1])])
+                use hal::Features;
+                adapter.physical_device.open(&[(&queue_family, &[1.0; 1])], Features::empty())
                     .map_err(|_| "Couldn't open the PhysicalDevice!")?
             };
             let queue_group = queues.take::<Graphics>(queue_family.id())
@@ -142,12 +143,12 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             let _ = if queue_group.queues.len() > 0 { Ok(()) } else { Err("The QueueGroup did not have any CommandQueues available!") }?;
             (device, queue_group)
         };
-        let (swapchain, extent, backbuffer, format, max_frames_in_flight) = {
-            let (caps, preferred_formats, present_modes, composite_alphas) = surf.compatibility(&adapter.physical_device);
+        let (swapchain, extent, backbuffers, format, max_frames_in_flight) = {
+            let (caps, preferred_formats, present_modes) = surf.compatibility(&adapter.physical_device);
             info!("{:?}", caps);
             info!("Preferred Formats: {:?}", preferred_formats);
             info!("Present Modes: {:?}", present_modes);
-            info!("Composite Alphas: {:?}", composite_alphas);
+            info!("Composite Alphas: {:?}", caps.composite_alpha);
             let present_mode = {
                 use self::hal::window::PresentMode::*;
                 [Mailbox, Fifo, Relaxed, Immediate]
@@ -157,8 +158,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                     .ok_or("No PresentMode values specified!")?
             };
             let composite_alpha = {
-                use self::hal::window::CompositeAlpha::*;
-                [Opaque, Inherit, PreMultiplied, PostMultiplied].iter().cloned().find(|ca| composite_alphas.contains(ca)).ok_or("No CompositeAlpha values specified!")?
+                use hal::window::CompositeAlpha;
+                [CompositeAlpha::OPAQUE, CompositeAlpha::INHERIT, CompositeAlpha::PREMULTIPLIED, CompositeAlpha::POSTMULTIPLIED].iter().cloned().find(
+                    |ca| caps.composite_alpha.contains(*ca)
+                ).ok_or("No CompositeAlpha values specified!")?
             };
             let format = match preferred_formats {
                 None => Format::Rgba8Srgb,
@@ -196,11 +199,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 image_usage,
             };
             info!("{:?}", swapchain_cfg);
-            let (swapchain, backbuffer) = unsafe {
+            let (swapchain, backbuffers) = unsafe {
                 device.create_swapchain(&mut surf, swapchain_cfg, None)
                     .map_err(|_| "Failed to create the swapchain!")?
             };
-            (swapchain, extent, backbuffer, format, image_count as usize)
+            (swapchain, extent, backbuffers, format, image_count as usize)
         };
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) = {
             let mut image_available_semaphores = vec![];
@@ -225,7 +228,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 layouts: Layout::Undefined..Layout::Present,
             };
             let depth_attachment = Attachment {
-                format: Some(Format::D32Float),
+                format: Some(hal::format::Format::D32Sfloat),
                 samples: 1,
                 ops: AttachmentOps {
                     load: AttachmentLoadOp::Clear,
@@ -312,6 +315,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 ty: gfx_hal::pso::DescriptorType::Sampler,
                 count: max_frames_in_flight,
             }],
+            DescriptorPoolCreateFlags::empty(),
         ).map_err(|_| "Couldn't create a descriptor pool!")? };
         let descriptor_sets = {
             let mut sets = Vec::with_capacity(max_frames_in_flight);
@@ -326,27 +330,20 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             }
             sets
         };
-        let image_views: Vec<_> = match backbuffer {
-            Backbuffer::Images(images) => images
-                .into_iter()
-                .map(|image| unsafe {
-                    device
-                        .create_image_view(
-                            &image,
-                            ViewKind::D2,
-                            format,
-                            Swizzle::NO,
-                            SubresourceRange {
-                                aspects: Aspects::COLOR,
-                                levels: 0..1,
-                                layers: 0..1,
-                            },
-                        )
-                        .map_err(|_| "Couldn't create the image_view for the image!")
-                })
-                .collect::<Result<Vec<_>, &str>>()?,
-            Backbuffer::Framebuffer(_) => unimplemented!("Can't handle framebuffer backbuffer!"),
-        };
+        let image_views: Vec<_> = backbuffers.into_iter().map(|image| unsafe {
+            device.create_image_view(
+                &image,
+                ViewKind::D2,
+                format,
+                Swizzle::NO,
+                SubresourceRange {
+                    aspects: Aspects::COLOR,
+                    levels: 0..1,
+                    layers: 0..1,
+                },
+            )
+            .map_err(|_| "Couldn't create the image_view for the image!")
+        }).collect::<Result<Vec<_>, &str>>()?;
         let depth_buffers = image_views.iter().map(|_| {
             texture::DepthImage::new(&adapter, &device, extent)
         }).collect::<Result<Vec<_>, &str>>()?;
@@ -485,9 +482,9 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 binding: 0,
                 element: Element {
                     format: match a.elemsize {
-                        4 => Ok(Format::R32Float),
-                        8 => Ok(Format::Rg32Float),
-                        12 => Ok(Format::Rgb32Float),
+                        4 => Ok(Format::R32Sfloat),
+                        8 => Ok(Format::Rg32Sfloat),
+                        12 => Ok(Format::Rgb32Sfloat),
                         _ => Err("Could not match size to format.")
                     }?,
                     offset: a.offset as u32,
@@ -500,7 +497,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 location: curr_loc,
                 binding: 1,
                 element: Element {
-                    format: Format::Rgba32Float,
+                    format: Format::Rgba32Sfloat,
                     offset: (i * 4 * size_of::<f32>()) as u32,
                 }
             });
@@ -533,20 +530,20 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
             stride: geom::Vertex::packed_byte_sz() as ElemStride,
-            rate: 0,
+            rate: VertexInputRate::Vertex,
         }, VertexBufferDesc {
             binding: 1,
             stride: (size_of::<f32>() * 16) as ElemStride,
-            rate: 1,
+            rate: VertexInputRate::Instance(1),
         }];
         let vertex_buffers_no_depth: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
             stride: geom::Vertex::packed_byte_sz() as ElemStride,
-            rate: 0,
+            rate:  VertexInputRate::Vertex,
         }, VertexBufferDesc {
             binding: 1,
             stride: (size_of::<f32>() * 16) as ElemStride,
-            rate: 1,
+            rate:  VertexInputRate::Instance(1),
         }];
         let attributes = Self::vertex_attribs()?;
         let attributes_no_depth = Self::vertex_attribs()?;
@@ -634,7 +631,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         let descriptor_set_layouts = Self::layout_set_descs(device)?;
         let push_constants: Vec<(ShaderStageFlags, std::ops::Range<u32>)> = vec![
             (ShaderStageFlags::VERTEX, 0..16),
-            (ShaderStageFlags::FRAGMENT, 16..21)
+            (ShaderStageFlags::FRAGMENT, 16..24),
         ];
         let layout = unsafe {
             device.create_pipeline_layout(&descriptor_set_layouts, push_constants)
@@ -709,19 +706,15 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
         let (img_idx_u32, img_idx_usize) = unsafe {
-            let image_index = self
-                .swapchain
-                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+            let (image_index, _optimality) = self.swapchain.acquire_image(core::u64::MAX, Some(image_available), None)
                 .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
             (image_index, image_index as usize)
         };
         let flight_fence = &self.in_flight_fences[img_idx_usize];
         unsafe {
-            self.device
-                .wait_for_fence(flight_fence, core::u64::MAX)
+            self.device.wait_for_fence(flight_fence, core::u64::MAX)
                 .map_err(|_| "Failed to wait on the fence!")?;
-            self.device
-                .reset_fence(flight_fence)
+            self.device.reset_fence(flight_fence)
                 .map_err(|_| "Couldn't reset the fence!")?;
         }
 
@@ -751,9 +744,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         let the_command_queue = &mut self.queue_group.queues[0];
         unsafe {
           the_command_queue.submit(submission, Some(flight_fence));
-          self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
-            .map_err(|_| "Failed to present into the swapchain!")
-        }
+          let _optimality = self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
+            .map_err(|_| "Failed to present into the swapchain!")?;
+        };
+        Ok(())
     }
     fn draw_instanced_geom<C: Into<[f32; 4]>>(&mut self, mm: Vec<geom::Model>, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
         // FRAME PREP
@@ -762,9 +756,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         // Advance the frame _before_ we start using the `?` operator
         self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
         let (img_idx_u32, img_idx_usize) = unsafe {
-            let image_index = self
-                .swapchain
-                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+            let (image_index, _optimality) = self.swapchain.acquire_image(core::u64::MAX, Some(image_available), None)
                 .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
             (image_index, image_index as usize)
         };
@@ -877,11 +869,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
-                    16, &Self::as_buffer(&color.into())
+                    64, &Self::as_buffer(&color.into())
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
-                    20, &[if mm[0].source.has_texture() { 1 } else { 0 }]
+                    80, &[if mm[0].source.has_texture() { 1 } else { 0 }]
                 );
                 encoder.draw_indexed(
                     0..(mm[0].source.ff_flat_cnt() as u32),
@@ -905,8 +897,9 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         unsafe {
             the_command_queue.submit(submission, Some(flight_fence));
             self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
-                .map_err(|_| "Failed to present into the swapchain!")
-        }
+                .map_err(|_| "Failed to present into the swapchain!")?;
+        };
+        Ok(())
     }
     fn draw_instanced_geom_no_depth<C: Into<[f32; 4]>>(&mut self, mm: Vec<geom::Model>, cam: geom::camera::Camera, color: C) -> Result<(), &'static str> {
         // FRAME PREP
@@ -915,9 +908,7 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         // Advance the frame _before_ we start using the `?` operator
         self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
         let (img_idx_u32, img_idx_usize) = unsafe {
-            let image_index = self
-                .swapchain
-                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+            let (image_index, _optimality) = self.swapchain.acquire_image(core::u64::MAX, Some(image_available), None)
                 .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
             (image_index, image_index as usize)
         };
@@ -1029,11 +1020,11 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
-                    16, &Self::as_buffer(&color.into())
+                    64, &Self::as_buffer(&color.into())
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout, ShaderStageFlags::FRAGMENT,
-                    20, &[if mm[0].source.has_texture() { 1 } else { 0 }]
+                    80, &[if mm[0].source.has_texture() { 1 } else { 0 }]
                 );
                 encoder.draw_indexed(
                     0..(mm[0].source.ff_flat_cnt() as u32),
@@ -1056,9 +1047,10 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
         let the_command_queue = &mut self.queue_group.queues[0];
         unsafe {
             the_command_queue.submit(submission, Some(flight_fence));
-            self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
-                .map_err(|_| "Failed to present into the swapchain!")
-        }
+            let _optimality = self.swapchain.present(the_command_queue, img_idx_u32, present_wait_semaphores)
+                .map_err(|_| "Failed to present into the swapchain!")?;
+        };
+        Ok(())
     }
     fn draw_geom_direct(&mut self, m: geom::Model, cam: geom::camera::Camera) -> Result<(), &'static str> {
         unimplemented!();

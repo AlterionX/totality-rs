@@ -46,15 +46,11 @@ pub trait Component {
 }
 
 fn iter(root: &Id, mode: IterMode, f: &Fn(&Component)) {
-    if mode == IterMode::PRE {
-        f(root.get());
-    }
+    if mode == IterMode::PRE { f(root.get()); }
     for child in root.get().children().iter() {
         pre_iter(child, f);
     }
-    if mode == IterMode::POST {
-        f(root.get());
-    }
+    if mode == IterMode::POST { f(root.get()); }
 }
 pub fn post_iter(root: &Id, f: &Fn(&Component)) {
     iter(root, IterMode::POST, f);

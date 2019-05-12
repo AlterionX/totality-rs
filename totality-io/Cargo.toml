@@ -9,7 +9,7 @@ edition = "2018"
 totality-threading = { path = "../totality-threading" }
 totality-hal-events = { path = "../totality-hal-events" }
 # imports
-winit = "0.18.1"
+winit = "0.19.1"
 nalgebra = "0.18.0"
 log = "0.4.6"
 

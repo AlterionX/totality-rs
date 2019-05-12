@@ -6,6 +6,7 @@ use super::{
 };
 use std::{
     mem::ManuallyDrop,
+    borrow::Cow,
 };
 use shaderc::{CompileOptions, Compiler};
 
@@ -60,8 +61,8 @@ impl <'a, B: Backend> CompiledShader<'a, B> {
     }
     pub fn get_entry(&'a self) -> EntryPoint<'a, B> {
         self.get_entry_specialized(Specialization {
-            constants: &[],
-            data: &[],
+            constants: Cow::Borrowed(&[]),
+            data: Cow::Borrowed(&[]),
         })
     }
     pub fn destroy(mut self, device: &mut <B>::Device) {

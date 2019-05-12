@@ -1,6 +1,29 @@
+//! # TotalityThreading
+//!
+//! Easily create heavy threads operating under various frequencies and conditions.
+//!
+//! Provides a variety of macros that help out with the thread creation. Also provides
+//! trace-level logging statements.
+
 extern crate proc_macro;
 pub mod killable_thread;
 
+/// A macro to create a simple KillableThread.
+///
+/// # Arguments
+///
+/// * `type` The fork's return type.
+/// * `name` A string literal of the name of the thread. Used for logging.
+/// * `head` The first part of the thread's execution. Could be used for setup. Variables declared
+/// here are accessible to `body` and `head`.
+/// * `body` The looped part of the body's execution.
+/// * `tail` The last part of the thread's execution. Could be used for cleanup. Should return
+/// value.
+///
+/// # Remarks
+///
+/// Don't sleep for a long time in the `body`!! If you do, the generated code cannot check for the
+/// interrupted-ness of the thread.
 #[macro_export]
 macro_rules! create_kt {
     ( $type:ty, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
@@ -42,6 +65,20 @@ macro_rules! create_kt {
     }
 }
 
+/// A macro to create a thread that aims to finish the loop with exactly a certain duration.
+///
+/// Refer to `create_kt` for more details.
+///
+/// # Arguments
+///
+/// * `type` The fork's return type.
+/// * `dura` Get the target Duration per loop.
+/// * `name` A string literal of the name of the thread. Used for logging.
+/// * `head` The first part of the thread's execution. Could be used for setup. Variables declared
+/// here are accessible to `body` and `head`.
+/// * `body` The looped part of the body's execution.
+/// * `tail` The last part of the thread's execution. Could be used for cleanup. Should return
+/// value.
 #[macro_export]
 macro_rules! create_duration_kt {
     ( $type:ty, $dura:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
@@ -89,6 +126,20 @@ macro_rules! create_duration_kt {
     }
 }
 
+/// A macro to create a thread that aims to run the loop at a target rate (aka FPS).
+///
+/// Refer to `create_kt` for more details.
+///
+/// # Arguments
+///
+/// * `type` The fork's return type.
+/// * `rate` An value denoting target fps. Must be nonzero.
+/// * `name` A string literal of the name of the thread. Used for logging.
+/// * `head` The first part of the thread's execution. Could be used for setup. Variables declared
+/// here are accessible to `body` and `head`.
+/// * `body` The looped part of the body's execution.
+/// * `tail` The last part of the thread's execution. Could be used for cleanup. Should return
+/// value.
 #[macro_export]
 macro_rules! create_rated_kt {
     ( $type:ty, $rate:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
