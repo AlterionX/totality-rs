@@ -68,8 +68,11 @@ pub enum V {
     Unknown,
 }
 impl Categorized<C> for V {
-    fn category(&self) -> C {
-        C::from(self)
+    fn category(&self) -> Option<C> {
+        match self {
+            V::Ignored => None,
+            _ => Some(C::from(self))
+        }
     }
 }
 

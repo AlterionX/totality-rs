@@ -1,40 +1,23 @@
 #![recursion_limit="512"]
-
 #[macro_use]
 extern crate lazy_static;
-
 extern crate totality_model as geom;
-
+// exports
 pub mod color;
 pub mod draw;
 pub mod event;
 pub mod components;
-mod layout;
-use event as e;
-use color::Color;
+pub mod linkage;
+pub mod layout;
 
-use std::{cmp::{max, min}, rc::Rc};
+use std::rc::Rc;
 
-use draw::{DrawCmd, Drawer};
-use layout::{Sz, Pos, Placer};
-use components::{Component, RootComponent, Id};
+use linkage::*;
+use draw::Drawer;
+use layout::{Sz, Pos};
+use components::{Component, Id};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum StackOrder {
-    HeadFirst,
-    TailFirst,
-}
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Img {
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Background {
-    Color(Color),
-    Img(Img),
-    Stacked(Vec<Background>, StackOrder),
-}
-
-pub struct Core {
+pub struct Core<EL: EventLinkage, DL: DrawLinkage> {
     drawing_area: Sz,
     world_placement: geom::Model,
     cam: geom::camera::Camera,
@@ -42,14 +25,20 @@ pub struct Core {
     drawer: Box<Drawer>,
     // indexed boxes for components
     pool: Vec<Rc<Component>>,
+    pub elink: EL,
+    pub dlink: DL,
 }
-impl Core {
+impl <EL: EventLinkage, DL: DrawLinkage> Core<EL, DL> {
+    fn new() {
+    }
     fn launch(&self) {
         loop {
             // pull events
             // reinterpret events as gui actions
         }
         // TODO exit the gui
+    }
+    pub fn dispatch_draw(&self) {
     }
     fn reposition(&mut self, id: Id, p: &Pos) {
     }
@@ -61,18 +50,5 @@ impl Core {
     }
 }
 
-pub struct Pane<P: Placer> {
-    children: Vec<Box<Component>>,
-    manager: P,
-}
-
-// impl <P: Placer> Component for Pane<P> {
-//     fn sz(&self) -> Size {
-//         Size(0, 0)
-//     }
-// }
-// impl <P: Placer> RootComponent for Pane<P> {}
-
-struct UI<T: RootComponent> {
-    root: T
-}
+// Implementation
+pub mod base_components;

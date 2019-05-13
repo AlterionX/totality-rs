@@ -1,7 +1,9 @@
 use crate::{color, layout, event as e, draw};
-use super::{Component, SizingInfo, Id, ShouldHaltPropagation};
+use crate::components::{Component, SizingInfo, Id, ShouldHaltPropagation, ChildrenInfo, Background};
 use layout::{Sz, Placer, LiteralPlacer};
 use draw::DrawCmd;
+
+use std::sync::Mutex;
 
 use std::cell::UnsafeCell;
 
@@ -13,6 +15,7 @@ pub struct DisplayTextBox {
     cbs: Vec<e::CBFn>,
     emp_vec: Vec<Id>,
     parent: Id,
+    has_resized: Mutex<bool>,
 }
 impl DisplayTextBox {
     fn new(text: Option<String>, parent: Id) -> Self {
@@ -24,28 +27,27 @@ impl DisplayTextBox {
             cbs: vec![],
             parent: parent,
             emp_vec: vec![],
+            has_resized: Mutex::new(false),
         }
     }
 }
 impl Component for DisplayTextBox {
-    fn min_sz(&self) -> Option<Sz> { self.inf.min }
-    fn max_sz(&self) -> Option<Sz> { self.inf.max }
-    fn preferred_sz(&self) -> Option<Sz> { self.inf.preferred }
-    fn bg(&self) -> super::Background { super::Background::Color(color::TRANSPARENT.clone()) }
-    fn placer(&self) -> &Box<Placer> {
-        &self.placer
-    }
-    fn parent(&self) -> &Id { &self.parent }
-    fn children(&self) -> &Vec<Id> { &self.emp_vec }
+    fn sz_info(&self) -> Option<&SizingInfo> { Some(&self.inf) }
+    fn children_info(&self) -> Option<&ChildrenInfo> { None }
+    fn parent(&self) -> Option<&Id> { Some(&self.parent) }
+    fn bg(&self) -> Option<Background> { Some(Background::Color(color::TRANSPARENT.clone())) }
     // Changes dynamically
     fn set_placer(&self, p: &Box<Placer>) { }
-    fn resize(&self, sz: Sz) { unsafe { *self.sz.get() = sz; } }
-    fn fire_event(&mut self, e: &e::E) -> ShouldHaltPropagation {
-        ShouldHaltPropagation(false)
+    fn resize(&self, sz: Sz) {
+        unsafe {
+            *self.sz.get() = sz;
+        }
+        *self.has_resized.lock().unwrap() = true;
     }
+    fn set_dirty(&mut self) { self.has_resized = Mutex::new(true); }
     fn assign_listener(&self) { // TODO figure out how this one works
     }
     // draw
-    fn need_redraw(&self) -> bool { false }
+    fn need_redraw(&self) -> bool { *self.has_resized.lock().unwrap() }
     fn draw(&self) -> Vec<DrawCmd> { vec![] }
 }

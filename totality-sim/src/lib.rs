@@ -53,8 +53,8 @@ impl Simulation {
         };
         // call post
     }
-    pub fn as_thread(d: Duration, sc: Arc<RwLock<Option<geom::scene::Scene>>>, post_cbs: Vec<Box<PhysicsHook>>, pre_cbs: Vec<Box<PhysicsHook>>) -> Result<th::killable_thread::KillableThread<()>, std::io::Error> {
-        th::create_duration_kt!((), d, "Simulation", {
+    pub fn as_thread(d: Duration, sc: Arc<RwLock<Option<geom::scene::Scene>>>, post_cbs: Vec<Box<PhysicsHook>>, pre_cbs: Vec<Box<PhysicsHook>>) -> Result<th::killable_thread::KillableThread<(), ()>, std::io::Error> {
+        th::create_duration_kt!(d, "Simulation", {
             let mut sim = {
                 Simulation {
                     scene: sc.clone(),
@@ -75,10 +75,8 @@ impl Simulation {
     }
 }
 
-pub type FinishResult = th::killable_thread::FinishResult<()>;
-
 pub struct SimulationManager {
-    sim_th: Option<th::killable_thread::KillableThread<()>>,
+    sim_th: Option<th::killable_thread::KillableThread<(), ()>>,
 }
 impl SimulationManager {
     pub fn new(d: Duration, sc: Arc<RwLock<Option<geom::scene::Scene>>>, post_cbs: Vec<Box<PhysicsHook>>, pre_cbs: Vec<Box<PhysicsHook>>) -> Result<SimulationManager, std::io::Error> {
@@ -86,15 +84,10 @@ impl SimulationManager {
             sim_th: Some(Simulation::as_thread(d, sc, post_cbs, pre_cbs)?)
         })
     }
-    pub fn finish(mut self) -> FinishResult {
-        self.sim_th.take().map_or_else(|| Option::None, |kt| kt.finish())
-    }
 }
 impl Drop for SimulationManager {
     fn drop(&mut self) {
-        if self.sim_th.is_some() {
-            panic!("Must call finish on SimulationManager before dropping.");
-        }
+        drop(self.sim_th.take());
     }
 }
 

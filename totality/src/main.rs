@@ -8,6 +8,10 @@ extern crate totality_io as io;
 extern crate totality_events as events;
 extern crate totality_model as geom;
 extern crate totality_threading as th;
+extern crate totality_gui as gui;
+
+mod gui_linkage;
+use gui_linkage as gui_link;
 
 use std::{
     option::Option,
@@ -22,6 +26,7 @@ use events::cb::ValueStore;
 use events::hal as e;
 use e::{C, V, a, p, b};
 use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
+use gui::{Core as GUI, base_components::{Pane, DisplayTextBox}};
 
 #[allow(dead_code)]
 use log::{debug, warn, error, info, trace};
@@ -55,9 +60,10 @@ enum Action { Continue, Exit, }
 struct State {
     sc: Arc<RwLock<Option<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
-    rs: Option<TypedRenderStage>,
+    ren: Option<TypedRenderStage>,
     sys: Option<io::Manager>, // TODO check mutability constraints
     sim: Option<sim::SimulationManager>,
+    gui: Option<GUI<gui_link::EventSystemLinkage, gui_link::RenderSystemLinkage>>,
     c: Config,
     // shutdown flow
     shutdown: Arc<Mutex<io::CBFn>>,
@@ -263,9 +269,10 @@ impl State {
         let sim = Some(sim::SimulationManager::new(sim_step, sc.clone(), vec![], vec![]).expect("Could not create Simulation!"));
         State {
             sc: sc,
-            rs: renderer,
-            sys: Option::Some(sm),
+            ren: renderer,
+            sys: Some(sm),
             sim: sim,
+            gui: None,
             c: cfg,
             // shutdown flow
             shutdown: cb_shutdown,
@@ -287,7 +294,7 @@ impl State {
             camera_roter: cb_rotor,
         }
     }
-    fn step(&mut self, delta: Duration) -> Action {
+    fn step(&mut self) -> Action {
         // Every invocation
         // TODO update state (hot loops)
         // Every frame -- Vsync, and all the other fancy stuffs prohibit this from completely
@@ -297,7 +304,7 @@ impl State {
         let original_color = self.color.lock().expect("Seriously?");
         let draw_id = *self.fish.lock().expect("Seriously?");
         let cam_clone = (*if let Ok(ref cam) = self.camera.lock() { cam } else { panic!("Camera poisoned!") }).clone();
-        let rs_ref = if let Some(ref rs) = self.rs { rs } else { return Action::Continue; };
+        let rs_ref = if let Some(ref ren) = self.ren { ren } else { return Action::Continue; };
         if let Ok(ref sc_g) = self.sc.read() {
             let dyns = if let Some(ref sc) = **sc_g {
                 sc.snatch()
@@ -361,29 +368,24 @@ impl State {
                 *srr_g = false;
             }
         }
+        if let Some(ref gui) = self.gui { gui.dispatch_draw(); }
         // Every <variable> invocations
         // TODO run cold logic
         // possibly do above 2 steps in lock step
         // TODO query system state
         (*self.current_action.lock().unwrap()).clone()
     }
-    fn cleanup(mut self) -> (io::FinishResult, sys::FinishResult, sim::FinishResult) {
-        // TODO change to let chaining once available
-        ({
-            info!("Shutting down system management.");
-            self.sys.take().map_or_else(|| Option::None, |s| s.finish())
-        }, {
-            info!("Shutting down rendering systems.");
-            self.rs.take().map_or_else(|| Option::None, |r| r.finish())
-        },{
-            info!("Shutting down simulation systems.");
-            self.sim.take().map_or_else(|| Option::None, |s| s.finish())
-        })
-    }
 }
 impl Drop for State {
     fn drop(&mut self) {
-        assert!(self.sys.is_none(), "You MUST call either cleanup on `State` to clean it up.");
+        info!("Shutting down simulation systems.");
+        drop(self.sim.take());
+        info!("Shutting down gui systems.");
+        drop(self.gui.take());
+        info!("Shutting down system management.");
+        drop(self.sys.take());
+        info!("Shutting down rendering systems.");
+        drop(self.ren.take());
     }
 }
 
@@ -399,7 +401,7 @@ fn main() {
         let curr_frame = Instant::now();
         let time_step = curr_frame - last_frame;
         trace!("Frame begin. {:?} since last frame.", time_step);
-        let act = s.step(time_step);
+        let act = s.step();
         if act == Action::Exit { break }
         last_frame = curr_frame;
         let sim_duration = Instant::now() - curr_frame;
@@ -410,9 +412,7 @@ fn main() {
         }
     };
     info!("Beginning Cleanup!");
-    match s.cleanup() {
-        _ => ()
-    }
+    drop(s);
     info!("And that's all for today, folks!")
 }
 

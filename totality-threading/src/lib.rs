@@ -26,7 +26,7 @@ pub mod killable_thread;
 /// interrupted-ness of the thread.
 #[macro_export]
 macro_rules! create_kt {
-    ( $type:ty, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+    ( $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
         {
             use log::*;
             use ::std::{
@@ -34,7 +34,7 @@ macro_rules! create_kt {
                 sync::mpsc::*,
             };
             let (tx, rx) = std::sync::mpsc::channel();
-            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || {
                 info!("Starting {} thread.", $name);
                 $($head)*;
                 loop {
@@ -81,7 +81,7 @@ macro_rules! create_kt {
 /// value.
 #[macro_export]
 macro_rules! create_duration_kt {
-    ( $type:ty, $dura:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+    ( $dura:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
         {
             use log::*;
             use ::std::{
@@ -90,7 +90,7 @@ macro_rules! create_duration_kt {
             };
             use $crate::killable_thread::KillableThread;
             let (tx, rx) = std::sync::mpsc::channel();
-            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || {
                 info!("Starting {} thread.", $name);
                 $($head)*;
                 let target = $dura;
@@ -142,7 +142,7 @@ macro_rules! create_duration_kt {
 /// value.
 #[macro_export]
 macro_rules! create_rated_kt {
-    ( $type:ty, $rate:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+    ( $rate:expr, $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
         {
             use log::*;
             use ::std::{
@@ -151,7 +151,7 @@ macro_rules! create_rated_kt {
             };
             use $crate::killable_thread::KillableThread;
             let (tx, rx) = std::sync::mpsc::channel();
-            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || -> $type {
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || {
                 info!("Starting {} thread.", $name);
                 $($head)*;
                 let target = Duration::from_secs(1).checked_div($rate).expect("A constant is taken to be equal to 0...");
@@ -187,13 +187,101 @@ macro_rules! create_rated_kt {
     }
 }
 
+/// A macro to create a thread that runs for every message sent.
+///
+/// # Arguments
+///
+/// * `send_type` The fork's Sender's type parameter.
+/// * `type` The fork's return type.
+/// * `name` A string literal of the name of the thread. Used for logging.
+/// * `v` The identifier of the input value that will be used in the body. Leaving this out
+/// prevents access to the event.
+/// * `head` The first part of the thread's execution. Could be used for setup. Variables declared
+/// here are accessible to `body` and `head`.
+/// * `body` The looped part of the body's execution.
+/// * `tail` The last part of the thread's execution. Could be used for cleanup. Should return
+/// value.
+#[macro_export]
+macro_rules! create_waiting_kt {
+    ( $name:literal, {$($head:tt)*}, | $v:ident | {$($body:tt)*}, {$($tail:tt)*} ) => {
+        {
+            use log::*;
+            use ::std::{
+                time::*,
+                sync::mpsc::*,
+            };
+            use $crate::killable_thread::KillableThread;
+            let (tx, rx) = std::sync::mpsc::channel();
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || {
+                info!("Starting {} thread.", $name);
+                $($head)*;
+                loop {
+                    let curr_start_time = Instant::now();
+                    trace!("Checking for {} thread's death.", $name);
+                    match rx.recv() {
+                        // Cannot handle messages
+                        Ok($v) => {
+                            $($body)*;
+                        },
+                        // Outside was dropped, so stop this thread
+                        Err(RecvError) => {
+                            info!("{} thread completed.", $name);
+                            break
+                        },
+                    };
+                    let total_time = Instant::now() - curr_start_time;
+                    trace!("{} thread spent {:?} total in loop.", $name, total_time);
+                }
+                let ret = { $($tail)* };
+                trace!("{} thread winding down.", $name);
+                ret
+            })
+        }
+    };
+    ( $name:literal, {$($head:tt)*}, {$($body:tt)*}, {$($tail:tt)*} ) => {
+        {
+            use log::*;
+            use ::std::{
+                time::*,
+                sync::mpsc::*,
+            };
+            use $crate::killable_thread::KillableThread;
+            let (tx, rx) = std::sync::mpsc::channel();
+            $crate::killable_thread::KillableThread::new(tx, $name.to_string(), move || {
+                info!("Starting {} thread.", $name);
+                $($head)*;
+                loop {
+                    let curr_start_time = Instant::now();
+                    trace!("Checking for {} thread's death.", $name);
+                    match rx.recv() {
+                        // Cannot handle messages
+                        Ok(_) => {
+                            $($body)*;
+                        },
+                        // Outside was dropped, so stop this thread
+                        Err(RecvError) => {
+                            info!("{} thread completed.", $name);
+                            break
+                        },
+                    };
+                    let total_time = Instant::now() - curr_start_time;
+                    trace!("{} thread spent {:?} total in loop.", $name, total_time);
+                }
+                let ret = { $($tail)* };
+                trace!("{} thread winding down.", $name);
+                ret
+            })
+        }
+    };
+}
+
 #[test]
 pub fn run_test() {
     use log::info;
 
     let some_fun = vec![0, 1, 2, 3, 4];
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    match create_kt!(String, ":", {
+    match create_kt!(":", {
         let mut hello = Vec::new();
         hello.extend(some_fun);
         let mut count = 0;

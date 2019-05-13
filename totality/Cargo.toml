@@ -9,6 +9,7 @@ edition = "2018"
 totality-render = { path = "../totality-render" }
 totality-sim = { path = "../totality-sim" }
 totality-io = { path = "../totality-io" }
+totality-gui = { path = "../totality-gui" }
 # Own, base independents
 totality-events = { path = "../totality-events" }
 totality-model = { path = "../totality-model" }

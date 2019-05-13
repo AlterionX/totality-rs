@@ -52,7 +52,7 @@ use self::hal::{
 use av::ArrayVec;
 use na::Vector4;
 use winit::Window;
-use th::killable_thread::{self as kt, KillableThread};
+use th::killable_thread::KillableThread;
 use model::{self as geom, scene::Scene};
 use buffers::{AllocatedBuffer, LoadedBuffer};
 use shaders::{ShaderInfo, CompiledShader};
@@ -1163,58 +1163,49 @@ impl <I: Instance> Drop for Renderer<I> {
 }
 
 pub struct RenderStage<I: Instance> {
-    req_tx: Sender<RenderReq<I>>,
     // update_rx: Receiver<geom::Frame>,
     scene: Arc<RwLock<Option<Scene>>>,
-    render_thread: Option<KillableThread<()>>,
+    render_thread: Option<KillableThread<RenderReq<I>, ()>>,
 }
 impl <I: Instance> RenderStage<I> {
-    fn start_render_thread<F: RendererCreator<I>>(req_rx: Receiver<RenderReq<I>>, w: Arc<Window>, f: F) -> KillableThread<()> {
-        th::create_kt!((), "Render Stage", {
+    fn start_render_thread<F: RendererCreator<I>>(w: Arc<Window>, f: F) -> KillableThread<RenderReq<I>, ()> {
+        th::create_waiting_kt!("Render Stage", {
             let mut r = f(&*w).expect("Fuck. Couldn't even create a thingy-thing.");
-        }, {
-            match req_rx.try_recv() {
-                Ok(req) => if let RenderReq::Restart = req {
-                    info!("Recreating renderer!");
-                    drop(r);
-                    r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
-                    info!("Renderer recreated!");
-                } else {
-                    match Renderer::handle_req(&mut r, req) {
-                        Ok(_) => (),
-                        Err(s) => {
-                            info!("Recreating renderer!");
-                            error!("Error ({:?}) while handling request. Attempting recovery...", s);
-                            drop(r);
-                            r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
-                            info!("Renderer recreated!");
-                        }
+        }, |req| {
+            if let RenderReq::Restart = req {
+                info!("Recreating renderer!");
+                drop(r);
+                r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                info!("Renderer recreated!");
+            } else {
+                match Renderer::handle_req(&mut r, req) {
+                    Ok(_) => (),
+                    Err(s) => {
+                        info!("Recreating renderer!");
+                        error!("Error ({:?}) while handling request. Attempting recovery...", s);
+                        drop(r);
+                        r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                        info!("Renderer recreated!");
                     }
-                },
-                Err(TryRecvError::Disconnected) => warn!("Request channel lost prior to shutdown!"),
-                Err(TryRecvError::Empty) => (),
+                }
             }
         }, {}).expect("Could not start render thread.... Welp I'm out.")
     }
     fn new<F: RendererCreator<I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
-        let (req_tx, req_rx) = channel();
         RenderStage {
-            req_tx: req_tx,
             scene: sc_arc,
-            render_thread: Option::Some(Self::start_render_thread(req_rx, w, f)),
+            render_thread: Option::Some(Self::start_render_thread(w, f)),
         }
     }
-    pub fn send_cmd(&self, q: RenderReq<I>) -> Result<(), SendError<RenderReq<I>>> { self.req_tx.send(q) }
-    pub fn finish(mut self) -> FinishResult {
-        self.render_thread.take().map_or_else(|| Option::None, |kt| kt.finish())
+    pub fn send_cmd(&self, q: RenderReq<I>) -> Result<(), SendError<RenderReq<I>>> {
+        if let Some(ref ren) = self.render_thread {
+            ren.send(q)
+        } else { Err(SendError(q)) }
     }
 }
-pub type FinishResult = kt::FinishResult<()>;
 impl <I: Instance> Drop for RenderStage<I> {
     fn drop(&mut self) {
-        if self.render_thread.is_some() {
-            panic!("Must call finish on RenderStage before dropping.");
-        }
+        drop(self.render_thread.take())
     }
 }
 

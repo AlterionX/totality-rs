@@ -23,7 +23,7 @@ use std::{
 use self::source::WindowSpecs;
 use self::source::IO;
 // workspace internal dependencies
-use th::killable_thread::{self as kt, KillableThread};
+use th::killable_thread::KillableThread;
 // external dependencies
 use winit::Window;
 use e::*;
@@ -61,7 +61,7 @@ pub type CB = cb::CB<State, V, C>;
 
 pub struct Manager {
     registrar: Twinned<Mutex<(Sender<cb::RegRequest<State, V, C>>, Receiver<cb::RegResponse<State, V, C>>)>>, // triggered periodically
-    pollers: Option<Twinned<KillableThread<()>>>, // thread handle of polling thread
+    pollers: Option<Twinned<KillableThread<(), ()>>>, // thread handle of polling thread
     pub win: Arc<self::source::back::Window>, // output is just this part
 }
 impl Manager {
@@ -72,8 +72,8 @@ impl Manager {
         win_tx: Sender<Window>,
         req_rx: Receiver<cb::RegRequest<State, V, C>>,
         res_tx: Sender<cb::RegResponse<State, V, C>>,
-    ) -> KillableThread<()> {
-        th::create_kt!((), "Immediate Event Loop", {
+    ) -> KillableThread<(), ()> {
+        th::create_kt!("Immediate Event Loop", {
             let mut man = cb::Manager::new();
             let mut io = self::source::back::IO::new();
             io.init();
@@ -119,8 +119,8 @@ impl Manager {
         s_m: Arc<Mutex<State>>,
         req_rx: Receiver<cb::RegRequest<State, V, C>>,
         res_tx: Sender<cb::RegResponse<State, V, C>>,
-    ) -> KillableThread<()> {
-        th::create_kt!((), "Periodic Event Loop", {
+    ) -> KillableThread<(), ()> {
+        th::create_rated_kt!(60, "Periodic Event Loop", {
             let mut man = cb::Manager::new();
         }, {
             trace!("Pulling callbacks.");
@@ -195,16 +195,10 @@ impl Manager {
             Err(_) => panic!("Fack. Dropping all the registrations.")
         }
     }
-    pub fn finish(mut self) -> FinishResult {
-        self.pollers.take().map(|pollers| pollers.map(|p| p.finish()).as_tup())
-    }
 }
-pub type FinishResult = Option<(kt::FinishResult<()>, kt::FinishResult<()>)>;
 impl Drop for Manager {
     fn drop(&mut self) {
-        if let Some(_) = self.pollers {
-            panic!("Finish must be called on Manager before it can be dropped.")
-        }
+        drop(self.pollers.take())
     }
 }
 

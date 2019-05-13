@@ -8,7 +8,7 @@ use std::{
 };
 
 pub trait Categorized<C: Hash + Eq + PartialEq + Copy + Clone> {
-    fn category(&self) -> C;
+    fn category(&self) -> Option<C>;
 }
 pub trait ValueStore<C: Hash + Eq + PartialEq + Copy + Clone, V: Categorized<C>> {
     fn get(&self, c: &C) -> V;
@@ -115,14 +115,15 @@ impl <G: ValueStore<C, V>, V: Categorized<C>, C: Hash + Eq + PartialEq + Copy + 
         let mut deallocs = Vec::new();
         let mut dealloc_idx = HashMap::new();
         for v in vv.iter() {
-            let c = v.category();
-            let (c, mut rr) = self.fire_category_events(s, &c, &v, &curr_inst);
-            if !rr.is_empty() {
-                let idx = dealloc_idx.entry(c.clone()).or_insert_with(|| {
-                    deallocs.push((c, Vec::with_capacity(1)));
-                    deallocs.len() - 1
-                }).clone();
-                deallocs[idx].1.append(&mut rr);
+            if let Some(c) = v.category() {
+                let (c, mut rr) = self.fire_category_events(s, &c, &v, &curr_inst);
+                if !rr.is_empty() {
+                    let idx = dealloc_idx.entry(c.clone()).or_insert_with(|| {
+                        deallocs.push((c, Vec::with_capacity(1)));
+                        deallocs.len() - 1
+                    }).clone();
+                    deallocs[idx].1.append(&mut rr);
+                }
             }
         }
         self.remove_matching(deallocs);
