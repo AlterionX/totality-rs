@@ -1,26 +1,26 @@
-#![recursion_limit="512"]
+#![recursion_limit = "512"]
 #[macro_use]
 extern crate lazy_static;
-extern crate totality_model as geom;
 extern crate log;
+extern crate totality_model as geom;
 
 // exports
 pub mod color;
+pub mod component;
 pub mod draw;
 pub mod event;
-pub mod components;
-pub mod linkage;
 pub mod layout;
+pub mod linkage;
 
 use std::rc::Rc;
 
-use linkage::*;
+use component::{Component, Id};
 use draw::Drawer;
-use layout::{Sz, Pos};
-use components::{Component, Id};
+use layout::{Pos, Sz};
+use linkage::*;
 
 #[allow(dead_code)]
-use log::{trace, debug, info, warn, error};
+use log::{debug, error, info, trace, warn};
 
 pub struct Core<EL: EventLinkage, DL: DrawLinkage> {
     drawing_area: Sz,
@@ -33,9 +33,8 @@ pub struct Core<EL: EventLinkage, DL: DrawLinkage> {
     pub elink: EL,
     pub dlink: DL,
 }
-impl <EL: EventLinkage, DL: DrawLinkage> Core<EL, DL> {
-    fn new() {
-    }
+impl<EL: EventLinkage, DL: DrawLinkage> Core<EL, DL> {
+    fn new() {}
     fn launch(&self) {
         loop {
             // pull events
@@ -43,22 +42,21 @@ impl <EL: EventLinkage, DL: DrawLinkage> Core<EL, DL> {
         }
         // TODO exit the gui
     }
-    pub fn dispatch_draw(&self) {
-    }
-    fn reposition(&mut self, id: Id, p: &Pos) {
-    }
+    pub fn dispatch_draw(&self) {}
+    fn reposition(&mut self, id: Id, p: &Pos) {}
     fn resize(&mut self, sz: Sz) {
         self.root.get().resize(sz);
     }
     fn draw(&self) {
-        components::pre_iter(&self.root, &|c| self.drawer.draw(c.draw()));
+        component::pre_iter(&self.root, &|c| self.drawer.draw(c.draw()));
     }
 }
 
-pub struct Manager {
-}
+pub struct Manager {}
 impl Manager {
-    pub fn new() -> Self { Self { } }
+    pub fn new() -> Self {
+        Self {}
+    }
     pub fn dispatch_draw(&self) {}
 }
 impl Drop for Manager {

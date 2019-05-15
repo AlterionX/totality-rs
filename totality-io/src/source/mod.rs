@@ -8,7 +8,9 @@ pub struct WindowSpecs {
     name: &'static str,
 }
 impl WindowSpecs {
-    pub fn new(name: &'static str) -> WindowSpecs { WindowSpecs { name : name } }
+    pub fn new(name: &'static str) -> WindowSpecs {
+        WindowSpecs { name: name }
+    }
 }
 
 pub trait IO {
@@ -19,4 +21,3 @@ pub trait IO {
     fn create_window(&self, specs: WindowSpecs) -> Self::Window;
     fn to_v(e: Self::Event) -> e::V;
 }
-

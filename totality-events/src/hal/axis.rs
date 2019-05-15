@@ -5,14 +5,14 @@ pub enum C {
 impl From<&V> for C {
     fn from(v: &V) -> C {
         match v {
-            V::Scroll(_) => C::Scroll
+            V::Scroll(_) => C::Scroll,
         }
     }
 }
 impl From<V> for C {
     fn from(v: V) -> C {
         match v {
-            V::Scroll(_) => C::Scroll
+            V::Scroll(_) => C::Scroll,
         }
     }
 }
@@ -24,8 +24,7 @@ pub enum V {
 impl V {
     pub fn default_value_of(c: &C) -> Self {
         match c {
-            Scroll => V::Scroll(0f32)
+            Scroll => V::Scroll(0f32),
         }
     }
 }
-

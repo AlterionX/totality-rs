@@ -1,4 +1,4 @@
-use crate::components::{Component, RootComponent};
+use crate::component::{Component, RootComponent};
 use crate::layout::Placer;
 
 pub struct Pane<P: Placer> {
@@ -11,4 +11,3 @@ pub struct Pane<P: Placer> {
 //     }
 // }
 // impl <P: Placer> RootComponent for Pane<P> {}
-

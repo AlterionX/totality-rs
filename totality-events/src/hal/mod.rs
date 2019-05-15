@@ -1,14 +1,14 @@
-pub mod change;
 pub mod axis;
-pub mod pos;
 pub mod button;
+pub mod change;
+pub mod pos;
 
 pub use self::axis as a;
-pub use self::pos as p;
 pub use self::button as b;
+pub use self::pos as p;
 
-use std::collections::HashMap;
 use crate::cb::{Categorized, ValueStore};
+use std::collections::HashMap;
 
 #[derive(Debug, Hash, Copy, Clone, PartialEq, Eq)]
 pub enum C {
@@ -50,13 +50,19 @@ impl From<&V> for C {
     }
 }
 impl From<a::C> for C {
-    fn from(c: a::C) -> C { C::A(c) }
+    fn from(c: a::C) -> C {
+        C::A(c)
+    }
 }
 impl From<p::C> for C {
-    fn from(k: p::C) -> C { C::P(k) }
+    fn from(k: p::C) -> C {
+        C::P(k)
+    }
 }
 impl From<b::C> for C {
-    fn from(c: b::C) -> C { C::B(c) }
+    fn from(c: b::C) -> C {
+        C::B(c)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -71,23 +77,29 @@ impl Categorized<C> for V {
     fn category(&self) -> Option<C> {
         match self {
             V::Ignored => None,
-            _ => Some(C::from(self))
+            _ => Some(C::from(self)),
         }
     }
 }
 
 #[derive(Default)]
 pub struct State {
-    m: HashMap<C, V>
+    m: HashMap<C, V>,
 }
 impl From<a::V> for V {
-    fn from(v: a::V) -> V { V::A(v) }
+    fn from(v: a::V) -> V {
+        V::A(v)
+    }
 }
 impl From<p::V> for V {
-    fn from(v: p::V) -> V { V::P(v) }
+    fn from(v: p::V) -> V {
+        V::P(v)
+    }
 }
 impl From<b::V> for V {
-    fn from(v: b::V) -> V { V::B(v) }
+    fn from(v: b::V) -> V {
+        V::B(v)
+    }
 }
 impl State {
     pub fn update<'a>(&mut self, v: &'a V) -> (C, &'a V) {

@@ -1,14 +1,27 @@
 use lazy_static;
-use std::{cmp::{ max, min }, rc::Rc};
+use std::{
+    cmp::{max, min},
+    rc::Rc,
+};
 
 fn map<T, U, F: Fn(&T) -> U>(tt: &[T; 4], f: F) -> [U; 4] {
     [f(&tt[0]), f(&tt[1]), f(&tt[2]), f(&tt[3])]
 }
 fn bimap<T, U, V, F: Fn(&T, &U) -> V>(tt: &[T; 4], uu: &[U; 4], f: F) -> [V; 4] {
-    [f(&tt[0], &uu[0]), f(&tt[1], &uu[1]), f(&tt[2], &uu[2]), f(&tt[3], &uu[3])]
+    [
+        f(&tt[0], &uu[0]),
+        f(&tt[1], &uu[1]),
+        f(&tt[2], &uu[2]),
+        f(&tt[3], &uu[3]),
+    ]
 }
 fn pairmap<T, U, F: Fn(&T, &T) -> U>(tt: &[T; 8], f: F) -> [U; 4] {
-    [f(&tt[0], &tt[1]), f(&tt[2], &tt[3]), f(&tt[4], &tt[5]), f(&tt[6], &tt[7])]
+    [
+        f(&tt[0], &tt[1]),
+        f(&tt[2], &tt[3]),
+        f(&tt[4], &tt[5]),
+        f(&tt[6], &tt[7]),
+    ]
 }
 fn hex_char(c: char) -> Result<u8, &'static str> {
     match c {
@@ -185,7 +198,9 @@ lazy_static! {
 impl Color {
     pub const MIN: u8 = 0;
     pub const MAX: u8 = 255;
-    pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self { Self([r, g, b, a]) }
+    pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self([r, g, b, a])
+    }
     pub fn as_rgba<T: Copy + Into<f64>>(r: T, g: T, b: T, a: T) -> Self {
         Self(map(&[r, g, b, a], |chan: &T| {
             let c: f64 = (*chan).into();
@@ -199,7 +214,9 @@ impl Color {
     pub fn hex_bb(col_bb: &[u8]) -> Result<Self, &'static str> {
         // TODO checks for str and ascii
         let mut hex_code = b"000000ff".clone();
-        if col_bb.len() == 0 { return Err("No input."); }
+        if col_bb.len() == 0 {
+            return Err("No input.");
+        }
         let start = if col_bb[0] == b'#' { 0 } else { 1 };
         for idx in (start..min(col_bb.len(), 8 + start)).step_by(2) {
             let b = &col_bb[idx];
@@ -210,25 +227,54 @@ impl Color {
     }
     pub fn hex_str(col_str: &str) -> Result<Self, &'static str> {
         let mut col_bb: [u8; 9] = [0; 9];
-        for (i, c) in col_str.chars().take(min(col_str.len(), 9)).map(hex_char).enumerate() {
-                col_bb[i] = c?;
+        for (i, c) in col_str
+            .chars()
+            .take(min(col_str.len(), 9))
+            .map(hex_char)
+            .enumerate()
+        {
+            col_bb[i] = c?;
         }
         Self::hex_bb(&col_bb)
     }
-    pub fn r(&self) -> &u8 { &self.0[0] }
-    pub fn g(&self) -> &u8 { &self.0[1] }
-    pub fn b(&self) -> &u8 { &self.0[2] }
-    pub fn a(&self) -> &u8 { &self.0[3] }
-    pub fn mix(c0: &Color, c1: &Color, ratio: f64) -> Color {
-        debug_assert!(ratio <= 1.0 && ratio == 0.0, "Ratio {:?} for mixing is invalid!", ratio);
-        let (Color(bb0), Color(bb1)) = (c0, c1);
-        Color(bimap(bb0, bb1, |b0, b1| (*b0 as f64 * (1.0 - ratio) + *b1 as f64 * ratio) as u8 ))
+    pub fn r(&self) -> &u8 {
+        &self.0[0]
     }
-    pub fn r_mut(&mut self) -> &mut u8 { &mut self.0[0] }
-    pub fn g_mut(&mut self) -> &mut u8 { &mut self.0[1] }
-    pub fn b_mut(&mut self) -> &mut u8 { &mut self.0[2] }
-    pub fn a_mut(&mut self) -> &mut u8 { &mut self.0[3] }
+    pub fn g(&self) -> &u8 {
+        &self.0[1]
+    }
+    pub fn b(&self) -> &u8 {
+        &self.0[2]
+    }
+    pub fn a(&self) -> &u8 {
+        &self.0[3]
+    }
+    pub fn mix(c0: &Color, c1: &Color, ratio: f64) -> Color {
+        debug_assert!(
+            ratio <= 1.0 && ratio == 0.0,
+            "Ratio {:?} for mixing is invalid!",
+            ratio
+        );
+        let (Color(bb0), Color(bb1)) = (c0, c1);
+        Color(bimap(bb0, bb1, |b0, b1| {
+            (*b0 as f64 * (1.0 - ratio) + *b1 as f64 * ratio) as u8
+        }))
+    }
+    pub fn r_mut(&mut self) -> &mut u8 {
+        &mut self.0[0]
+    }
+    pub fn g_mut(&mut self) -> &mut u8 {
+        &mut self.0[1]
+    }
+    pub fn b_mut(&mut self) -> &mut u8 {
+        &mut self.0[2]
+    }
+    pub fn a_mut(&mut self) -> &mut u8 {
+        &mut self.0[3]
+    }
 }
 impl From<(u8, u8, u8, u8)> for Color {
-    fn from(tup: (u8, u8, u8, u8)) -> Self { Self([tup.0, tup.1, tup.2, tup.3]) }
+    fn from(tup: (u8, u8, u8, u8)) -> Self {
+        Self([tup.0, tup.1, tup.2, tup.3])
+    }
 }

@@ -3,10 +3,10 @@
 //! A KillableThread is a thread with a built-in interruption mechanism/flag.
 
 use std::{
-    thread::JoinHandle,
     option::Option,
-    sync::mpsc::{Sender, SendError},
     result::Result,
+    sync::mpsc::{SendError, Sender},
+    thread::JoinHandle,
 };
 
 /// A `KillableThread`. Effectively a `JoinHandle` to the thread started by when creating
@@ -15,7 +15,7 @@ pub struct KillableThread<P: Send + 'static, T: Send + 'static> {
     kill_mechanism: Option<Sender<P>>,
     handle: Option<JoinHandle<T>>,
 }
-impl <P: Send + 'static, T: Send + 'static> KillableThread<P, T> {
+impl<P: Send + 'static, T: Send + 'static> KillableThread<P, T> {
     /// Creates a `KillableThread`.
     ///
     /// # Arguments
@@ -28,13 +28,17 @@ impl <P: Send + 'static, T: Send + 'static> KillableThread<P, T> {
     ///
     /// You must manually check if sender is dropped. If you wish for a less optimized, but easier
     /// way to do this, check out the macros provided at the crate's top level.
-    pub fn new<F: FnOnce() -> T + Send + 'static>(s: Sender<P>, name: String, f: F) -> Result<KillableThread<P, T>, std::io::Error> {
+    pub fn new<F: FnOnce() -> T + Send + 'static>(
+        s: Sender<P>,
+        name: String,
+        f: F,
+    ) -> Result<KillableThread<P, T>, std::io::Error> {
         match std::thread::Builder::new().name(name).spawn(f) {
             Ok(h) => Result::Ok(KillableThread {
                 kill_mechanism: Option::Some(s),
-                handle: Option::Some(h)
+                handle: Option::Some(h),
             }),
-            Err(e) => Result::Err(e)
+            Err(e) => Result::Err(e),
         }
     }
     /// Send a packed `p` to the thread.
@@ -61,7 +65,7 @@ impl <P: Send + 'static, T: Send + 'static> KillableThread<P, T> {
 }
 /// Alias for the return of `finish` in `KillableThread`.
 pub type FinishResult<T> = Option<std::thread::Result<T>>;
-impl <P: Send + 'static, T: Send + 'static> Drop for KillableThread<P, T> {
+impl<P: Send + 'static, T: Send + 'static> Drop for KillableThread<P, T> {
     fn drop(&mut self) {
         drop(self.kill_mechanism.take());
         drop(self.handle.take().map(|h| h.join()));

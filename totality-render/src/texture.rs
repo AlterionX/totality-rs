@@ -1,93 +1,98 @@
 use super::{
+    buffers::AllocatedBuffer,
     hal::{
-        Backend, Device, Adapter, PhysicalDevice,
-        memory::{Requirements, Properties, Barrier},
         adapter::MemoryTypeId,
-        queue::{CommandQueue,capability::{Capability, Supports, Transfer}},
-        pool::CommandPool,
         buffer::Usage,
-        format::{Format, Swizzle, Aspects},
-        image::{self, ViewKind, SubresourceRange, Layout},
-        pso::PipelineStage,
         command::BufferImageCopy,
+        format::{Aspects, Format, Swizzle},
+        image::{self, Layout, SubresourceRange, ViewKind},
+        memory::{Barrier, Properties, Requirements},
+        pool::CommandPool,
+        pso::PipelineStage,
+        queue::{
+            capability::{Capability, Supports, Transfer},
+            CommandQueue,
+        },
         window::Extent2D,
+        Adapter, Backend, Device, PhysicalDevice,
     },
     img,
-    buffers::AllocatedBuffer,
 };
 use std::{
-    mem::{ManuallyDrop, size_of},
     marker::PhantomData,
+    mem::{size_of, ManuallyDrop},
 };
 
 #[allow(dead_code)]
-use log::{error, warn, info, debug, trace};
+use log::{debug, error, info, trace, warn};
 
 // Parts for a depth buffer image
 pub struct DepthImage<B: Backend> {
-  pub image: ManuallyDrop<B::Image>,
-  pub requirements: Requirements,
-  pub memory: ManuallyDrop<B::Memory>,
-  pub image_view: ManuallyDrop<B::ImageView>,
-  pub phantom: PhantomData<B::Device>,
+    pub image: ManuallyDrop<B::Image>,
+    pub requirements: Requirements,
+    pub memory: ManuallyDrop<B::Memory>,
+    pub image_view: ManuallyDrop<B::ImageView>,
+    pub phantom: PhantomData<B::Device>,
 }
-impl<B: Backend<Device=D>, D: Device<B>> DepthImage<B> {
-  pub fn new(adapter: &Adapter<B>, device: &D, extent: Extent2D) -> Result<Self, &'static str> {
-    unsafe {
-      let mut the_image = device
-        .create_image(
-          gfx_hal::image::Kind::D2(extent.width, extent.height, 1, 1),
-          1,
-          Format::D32Sfloat,
-          gfx_hal::image::Tiling::Optimal,
-          gfx_hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
-          gfx_hal::image::ViewCapabilities::empty(),
-        )
-        .map_err(|_| "Couldn't crate the image!")?;
-      let requirements = device.get_image_requirements(&the_image);
-      let memory_type_id = adapter
-        .physical_device
-        .memory_properties()
-        .memory_types
-        .iter()
-        .enumerate()
-        .find(|&(id, memory_type)| {
-          // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
-          requirements.type_mask & (1 << id) != 0
-            && memory_type.properties.contains(Properties::DEVICE_LOCAL)
-        })
-        .map(|(id, _)| MemoryTypeId(id))
-        .ok_or("Couldn't find a memory type to support the image!")?;
-      let memory = device
-        .allocate_memory(memory_type_id, requirements.size)
-        .map_err(|_| "Couldn't allocate image memory!")?;
-      device
-        .bind_image_memory(&memory, 0, &mut the_image)
-        .map_err(|_| "Couldn't bind the image memory!")?;
-      let image_view = device
-        .create_image_view(
-          &the_image,
-          gfx_hal::image::ViewKind::D2,
-          Format::D32Sfloat,
-          gfx_hal::format::Swizzle::NO,
-          SubresourceRange {
-            aspects: Aspects::DEPTH,
-            levels: 0..1,
-            layers: 0..1,
-          },
-        )
-        .map_err(|_| "Couldn't create the image view!")?;
-      Ok(Self {
-        image: ManuallyDrop::new(the_image),
-        requirements,
-        memory: ManuallyDrop::new(memory),
-        image_view: ManuallyDrop::new(image_view),
-        phantom: PhantomData,
-      })
+impl<B: Backend<Device = D>, D: Device<B>> DepthImage<B> {
+    pub fn new(adapter: &Adapter<B>, device: &D, extent: Extent2D) -> Result<Self, &'static str> {
+        unsafe {
+            let mut the_image = device
+                .create_image(
+                    gfx_hal::image::Kind::D2(extent.width, extent.height, 1, 1),
+                    1,
+                    Format::D32Sfloat,
+                    gfx_hal::image::Tiling::Optimal,
+                    gfx_hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
+                    gfx_hal::image::ViewCapabilities::empty(),
+                )
+                .map_err(|_| "Couldn't crate the image!")?;
+            let requirements = device.get_image_requirements(&the_image);
+            let memory_type_id = adapter
+                .physical_device
+                .memory_properties()
+                .memory_types
+                .iter()
+                .enumerate()
+                .find(|&(id, memory_type)| {
+                    // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
+                    requirements.type_mask & (1 << id) != 0
+                        && memory_type.properties.contains(Properties::DEVICE_LOCAL)
+                })
+                .map(|(id, _)| MemoryTypeId(id))
+                .ok_or("Couldn't find a memory type to support the image!")?;
+            let memory = device
+                .allocate_memory(memory_type_id, requirements.size)
+                .map_err(|_| "Couldn't allocate image memory!")?;
+            device
+                .bind_image_memory(&memory, 0, &mut the_image)
+                .map_err(|_| "Couldn't bind the image memory!")?;
+            let image_view = device
+                .create_image_view(
+                    &the_image,
+                    gfx_hal::image::ViewKind::D2,
+                    Format::D32Sfloat,
+                    gfx_hal::format::Swizzle::NO,
+                    SubresourceRange {
+                        aspects: Aspects::DEPTH,
+                        levels: 0..1,
+                        layers: 0..1,
+                    },
+                )
+                .map_err(|_| "Couldn't create the image view!")?;
+            Ok(Self {
+                image: ManuallyDrop::new(the_image),
+                requirements,
+                memory: ManuallyDrop::new(memory),
+                image_view: ManuallyDrop::new(image_view),
+                phantom: PhantomData,
+            })
+        }
     }
-  }
 
-    pub fn img_view_ref(&self) -> &B::ImageView { &self.image_view }
+    pub fn img_view_ref(&self) -> &B::ImageView {
+        &self.image_view
+    }
     pub unsafe fn free(&self, device: &D) {
         use core::ptr::read;
         device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
@@ -105,11 +110,14 @@ pub struct LoadedImage<B: Backend> {
     sampler: ManuallyDrop<B::Sampler>,
     phantom: PhantomData<B::Device>,
 }
-impl <B: Backend> LoadedImage<B> {
+impl<B: Backend> LoadedImage<B> {
     pub fn new<C: Capability + Supports<Transfer>>(
-        adapter: &Adapter<B>, device: &mut B::Device, command_pool: &mut CommandPool<B, C>,
-        command_queue: &mut CommandQueue<B, C>, img: img::RgbaImage,
-        name: String
+        adapter: &Adapter<B>,
+        device: &mut B::Device,
+        command_pool: &mut CommandPool<B, C>,
+        command_queue: &mut CommandQueue<B, C>,
+        img: img::RgbaImage,
+        name: String,
     ) -> Result<Self, &'static str> {
         unsafe {
             // 0. First we compute some memory related values.
@@ -123,9 +131,11 @@ impl <B: Backend> LoadedImage<B> {
             //    transfer_src usage
             let required_bytes = row_pitch * img.height() as usize;
             let mut staging_buffer = AllocatedBuffer::new(
-                &adapter, device, None,
+                &adapter,
+                device,
+                None,
                 required_bytes as u64,
-                Usage::TRANSFER_SRC
+                Usage::TRANSFER_SRC,
             )?;
             // 2. use mapping writer to put the image data into that buffer
             staging_buffer.load_data(device, |target| {
@@ -136,43 +146,57 @@ impl <B: Backend> LoadedImage<B> {
                 }
             });
             // 3. Make an image with transfer_dst and SAMPLED usage
-            let mut the_image = device.create_image(
-                  gfx_hal::image::Kind::D2(img.width(), img.height(), 1, 1),
-                  1,
-                  Format::Rgba8Srgb,
-                  image::Tiling::Optimal,
-                  image::Usage::TRANSFER_DST | gfx_hal::image::Usage::SAMPLED,
-                  image::ViewCapabilities::empty(),
-            ).map_err(|_| "Couldn't create the image!")?;
+            let mut the_image = device
+                .create_image(
+                    gfx_hal::image::Kind::D2(img.width(), img.height(), 1, 1),
+                    1,
+                    Format::Rgba8Srgb,
+                    image::Tiling::Optimal,
+                    image::Usage::TRANSFER_DST | gfx_hal::image::Usage::SAMPLED,
+                    image::ViewCapabilities::empty(),
+                )
+                .map_err(|_| "Couldn't create the image!")?;
             // 4. allocate memory for the image and bind it
             let requirements = device.get_image_requirements(&the_image);
-            let memory_type_id = adapter.physical_device.memory_properties()
-                .memory_types.iter().enumerate()
+            let memory_type_id = adapter
+                .physical_device
+                .memory_properties()
+                .memory_types
+                .iter()
+                .enumerate()
                 .find(|&(id, memory_type)| {
                     // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
                     requirements.type_mask & (1 << id) != 0
                         && memory_type.properties.contains(Properties::DEVICE_LOCAL)
-                }).map(|(id, _)| MemoryTypeId(id))
+                })
+                .map(|(id, _)| MemoryTypeId(id))
                 .ok_or("Couldn't find a memory type to support the image!")?;
-            let memory = device.allocate_memory(memory_type_id, requirements.size)
+            let memory = device
+                .allocate_memory(memory_type_id, requirements.size)
                 .map_err(|_| "Couldn't allocate image memory!")?;
-            device.bind_image_memory(&memory, 0, &mut the_image)
+            device
+                .bind_image_memory(&memory, 0, &mut the_image)
                 .map_err(|_| "Couldn't bind the image memory!")?;
             // 5. create image view and sampler
-            let image_view = device.create_image_view(
-                &the_image,
-                ViewKind::D2,
-                Format::Rgba8Srgb,
-                Swizzle::NO,
-                SubresourceRange {
-                    aspects: Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
-                },
-            ).map_err(|_| "Couldn't create the image view!")?;
-            let sampler = device.create_sampler(gfx_hal::image::SamplerInfo::new(
-                gfx_hal::image::Filter::Nearest, gfx_hal::image::WrapMode::Tile,
-            )).map_err(|_| "Couldn't create the sampler!")?;
+            let image_view = device
+                .create_image_view(
+                    &the_image,
+                    ViewKind::D2,
+                    Format::Rgba8Srgb,
+                    Swizzle::NO,
+                    SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        levels: 0..1,
+                        layers: 0..1,
+                    },
+                )
+                .map_err(|_| "Couldn't create the image view!")?;
+            let sampler = device
+                .create_sampler(gfx_hal::image::SamplerInfo::new(
+                    gfx_hal::image::Filter::Nearest,
+                    gfx_hal::image::WrapMode::Tile,
+                ))
+                .map_err(|_| "Couldn't create the sampler!")?;
             // 6. create a command buffer
             let mut cmd_buffer = command_pool.acquire_command_buffer::<gfx_hal::command::OneShot>();
             cmd_buffer.begin();
@@ -181,8 +205,8 @@ impl <B: Backend> LoadedImage<B> {
             let image_barrier = Barrier::Image {
                 states: (gfx_hal::image::Access::empty(), Layout::Undefined)
                     ..(
-                      gfx_hal::image::Access::TRANSFER_WRITE,
-                      Layout::TransferDstOptimal,
+                        gfx_hal::image::Access::TRANSFER_WRITE,
+                        Layout::TransferDstOptimal,
                     ),
                 target: &the_image,
                 families: None,
@@ -225,10 +249,11 @@ impl <B: Backend> LoadedImage<B> {
                 states: (
                     gfx_hal::image::Access::TRANSFER_WRITE,
                     Layout::TransferDstOptimal,
-                )..(
-                    gfx_hal::image::Access::SHADER_READ,
-                    Layout::ShaderReadOnlyOptimal,
-                ),
+                )
+                    ..(
+                        gfx_hal::image::Access::SHADER_READ,
+                        Layout::ShaderReadOnlyOptimal,
+                    ),
                 target: &the_image,
                 families: None,
                 range: SubresourceRange {
@@ -266,8 +291,12 @@ impl <B: Backend> LoadedImage<B> {
             })
         }
     }
-    pub fn img_view_ref(&self) -> &B::ImageView { &self.image_view }
-    pub fn sampler_ref(&self) -> &B::Sampler { &self.sampler }
+    pub fn img_view_ref(&self) -> &B::ImageView {
+        &self.image_view
+    }
+    pub fn sampler_ref(&self) -> &B::Sampler {
+        &self.sampler
+    }
     pub unsafe fn free(&self, device: &B::Device) {
         use core::ptr::read;
         device.destroy_sampler(ManuallyDrop::into_inner(read(&self.sampler)));

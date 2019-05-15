@@ -2,7 +2,11 @@ use na::Vector2;
 
 #[derive(Debug, Hash, Copy, Clone, PartialEq, Eq)]
 pub enum C {
-    MousePos, MouseDelta, ScreenPos, CursorPos, ScreenSz,
+    MousePos,
+    MouseDelta,
+    ScreenPos,
+    CursorPos,
+    ScreenSz,
 }
 impl From<V> for C {
     fn from(v: V) -> C {
@@ -53,4 +57,3 @@ impl V {
         }
     }
 }
-

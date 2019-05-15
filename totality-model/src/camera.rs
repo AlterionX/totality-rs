@@ -1,6 +1,6 @@
-use na::{UnitQuaternion, Vector3, Vector4, Matrix4, U1, U3, U4};
 #[allow(dead_code)]
-use log::{trace, debug, info, warn, error};
+use log::{debug, error, info, trace, warn};
+use na::{Matrix4, UnitQuaternion, Vector3, Vector4, U1, U3, U4};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Camera {
@@ -10,39 +10,25 @@ pub enum Camera {
 impl Camera {
     pub fn get_vp_mat(&self) -> Matrix4<f32> {
         match self {
-            Camera::Perspective(cam) => {
-                cam.vp_mat()
-            },
-            Camera::Orthographic(cam) => {
-                cam.vp_mat()
-            }
+            Camera::Perspective(cam) => cam.vp_mat(),
+            Camera::Orthographic(cam) => cam.vp_mat(),
         }
     }
     pub fn trans_cam_space(&mut self, v: Vector3<f32>) {
         match self {
-            Camera::Perspective(cam) => {
-                cam.trans_cam_space(v)
-            },
-            Camera::Orthographic(cam) => {
-                cam.trans_cam_space(v)
-            }
+            Camera::Perspective(cam) => cam.trans_cam_space(v),
+            Camera::Orthographic(cam) => cam.trans_cam_space(v),
         }
     }
     pub fn pos(&self) -> Vector3<f32> {
         match self {
-            Camera::Perspective(cam) => {
-                cam.pos()
-            },
-            Camera::Orthographic(cam) => {
-                cam.pos()
-            }
+            Camera::Perspective(cam) => cam.pos(),
+            Camera::Orthographic(cam) => cam.pos(),
         }
     }
     pub fn rot_cam_space(&mut self, v: UnitQuaternion<f32>) {
         match self {
-            Camera::Perspective(cam) => {
-                cam.rot_cam_space(v)
-            },
+            Camera::Perspective(cam) => cam.rot_cam_space(v),
             Camera::Orthographic(_) => {}
         }
     }
@@ -56,14 +42,25 @@ pub struct OrthoCamera {
     _v_cache: Matrix4<f32>,
 }
 impl OrthoCamera {
-    pub fn v_mat(&self) -> Matrix4<f32> { self._v_cache }
-    pub fn p_mat(&self) -> Matrix4<f32> { self._p_cache }
-    pub fn vp_mat(&self) -> Matrix4<f32> { self.p_mat() * self.v_mat() }
-    fn calc_p_mat(&mut self) { self._p_cache.fill_with_identity(); self._p_cache[(1, 1)] = -1.; }
+    pub fn v_mat(&self) -> Matrix4<f32> {
+        self._v_cache
+    }
+    pub fn p_mat(&self) -> Matrix4<f32> {
+        self._p_cache
+    }
+    pub fn vp_mat(&self) -> Matrix4<f32> {
+        self.p_mat() * self.v_mat()
+    }
+    fn calc_p_mat(&mut self) {
+        self._p_cache.fill_with_identity();
+        self._p_cache[(1, 1)] = -1.;
+    }
     fn calc_v_mat(&mut self) {
         self._v_cache.fill_with_identity();
         self._v_cache[(2, 2)] = -1.;
-        self._v_cache.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&(self.position * -1.0));
+        self._v_cache
+            .fixed_slice_mut::<U3, U1>(0, 3)
+            .copy_from(&(self.position * -1.0));
     }
     pub fn trans(&mut self, shift: Vector3<f32>) {
         self.position += shift;
@@ -72,7 +69,9 @@ impl OrthoCamera {
     pub fn trans_cam_space(&mut self, shift: Vector3<f32>) {
         self.trans(self.orientation.inverse_transform_vector(&shift));
     }
-    pub fn pos(&self) -> Vector3<f32> { self.position }
+    pub fn pos(&self) -> Vector3<f32> {
+        self.position
+    }
 }
 impl Default for OrthoCamera {
     fn default() -> OrthoCamera {
@@ -100,9 +99,15 @@ pub struct PerspectiveCamera {
     _v_cache: Matrix4<f32>,
 }
 impl PerspectiveCamera {
-    pub fn v_mat(&self) -> Matrix4<f32> { self._v_cache }
-    pub fn p_mat(&self) -> Matrix4<f32> { self._p_cache }
-    pub fn vp_mat(&self) -> Matrix4<f32> { self.p_mat() * self.v_mat() }
+    pub fn v_mat(&self) -> Matrix4<f32> {
+        self._v_cache
+    }
+    pub fn p_mat(&self) -> Matrix4<f32> {
+        self._p_cache
+    }
+    pub fn vp_mat(&self) -> Matrix4<f32> {
+        self.p_mat() * self.v_mat()
+    }
     fn calc_p_mat(&mut self) {
         let n = self.near_plane_dist;
         let f = self.far_plane_dist;
@@ -110,16 +115,32 @@ impl PerspectiveCamera {
         let a = -self.aspect;
         let cot = 1. / (self.fov * 0.5).tan();
         self._p_cache = Matrix4::new(
-             cot,  0f32,  0f32,   0f32,
-            0f32, a*cot,  0f32,   0f32,
-            0f32,  0f32,   f_d,  n*f_d,
-            0f32,  0f32, -1f32,   0f32,
+            cot,
+            0f32,
+            0f32,
+            0f32,
+            0f32,
+            a * cot,
+            0f32,
+            0f32,
+            0f32,
+            0f32,
+            f_d,
+            n * f_d,
+            0f32,
+            0f32,
+            -1f32,
+            0f32,
         );
     }
     fn calc_v_mat(&mut self) {
         self._v_cache = self.orientation.to_homogeneous();
-        self._v_cache.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.position);
-        if !self._v_cache.try_inverse_mut() { panic!("Could not invert view matrix!"); }
+        self._v_cache
+            .fixed_slice_mut::<U3, U1>(0, 3)
+            .copy_from(&self.position);
+        if !self._v_cache.try_inverse_mut() {
+            panic!("Could not invert view matrix!");
+        }
     }
     pub fn rot(&mut self, rotor: UnitQuaternion<f32>) {
         self.orientation = rotor * self.orientation;
@@ -136,7 +157,9 @@ impl PerspectiveCamera {
         self.orientation = self.orientation * rotor;
         self.calc_v_mat();
     }
-    pub fn pos(&self) -> Vector3<f32> { self.position }
+    pub fn pos(&self) -> Vector3<f32> {
+        self.position
+    }
 }
 impl Default for PerspectiveCamera {
     fn default() -> Self {

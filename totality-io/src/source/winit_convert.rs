@@ -1,18 +1,16 @@
 use std::{
-    sync::mpsc::{channel, Receiver},
     cell::RefCell,
+    sync::mpsc::{channel, Receiver},
 };
 
-use internal_events::hal as e;
 use super::WindowSpecs;
+use internal_events::hal as e;
 
-use winit::{
-    Event, EventsLoop, ControlFlow, WindowEvent, DeviceEvent,
-    KeyboardInput, VirtualKeyCode, ScanCode,
-    WindowBuilder,
-    dpi::*,
-};
 use log::{debug, trace};
+use winit::{
+    dpi::*, ControlFlow, DeviceEvent, Event, EventsLoop, KeyboardInput, ScanCode, VirtualKeyCode,
+    WindowBuilder, WindowEvent,
+};
 
 pub type Window = winit::Window;
 pub struct IO {
@@ -33,7 +31,7 @@ impl super::IO for IO {
     }
     fn next_events(&self, buf: &mut Vec<e::V>) {
         if let Some(ref e_loop) = self.e_loop {
-            e_loop.borrow_mut().poll_events(|e| { buf.push(Self::to_v(e)) })
+            e_loop.borrow_mut().poll_events(|e| buf.push(Self::to_v(e)))
         }
     }
     fn create_window(&self, specs: WindowSpecs) -> Self::Window {
@@ -54,60 +52,57 @@ impl super::IO for IO {
                 event: WindowEvent::CloseRequested,
                 ..
             } => e::b::V(e::b::Flag::Close.into(), e::b::State::DOWN).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::Resized(LogicalSize { width, height }),
-                 ..
-             } => e::p::V::ScreenSz(e::p::SzState(na::Vector2::new(width as f32, height as f32))).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::Refresh,
-                 ..
-             } =>  e::b::V(e::b::Flag::Refresh.into(), e::b::State::DOWN).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::CursorEntered { .. },
-                 ..
-             } =>  e::b::V(e::b::Flag::CursorEntered.into(), e::b::State::DOWN).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::CursorLeft { .. },
-                 ..
-             } =>  e::b::V(e::b::Flag::CursorEntered.into(), e::b::State::DOWN).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::CursorMoved { position: p, .. },
-                 ..
-             } =>  e::p::V::CursorPos(e::p::PosState(as_vec(p))).into(),
-             Event::WindowEvent {
-                 event: WindowEvent::Focused(f),
-                 ..
-             } =>  e::b::V(e::b::Flag::Focus.into(), e::b::State::DOWN).into(),
-             Event::DeviceEvent { // Ignored since it's actually a duplicate of the below.
-                 event: DeviceEvent::Key(_),
-                 ..
-             } => e::V::Ignored,
-             Event::WindowEvent {
-                 event: WindowEvent::KeyboardInput {
-                     input: k,
-                     ..
-                 },
-                 ..
-             } => parse_keyboard(k),
-             Event::DeviceEvent {
-                 event: DeviceEvent::Motion { .. },
-                 ..
-             } => e::V::Ignored,
-             Event::DeviceEvent {
-                 event: DeviceEvent::MouseMotion { delta: (x, y) },
-                 ..
-             } => e::V::Ignored,
-             Event::WindowEvent {
-                 event: WindowEvent::AxisMotion {
-                     ..
-                 },
-                 ..
-             } => e::V::Ignored,
-             Event::WindowEvent {
-                 event: WindowEvent::ReceivedCharacter(_),
-                 ..
-             } => e::V::Ignored,
-             Event::Awakened => e::V::Ignored,
+            Event::WindowEvent {
+                event: WindowEvent::Resized(LogicalSize { width, height }),
+                ..
+            } => e::p::V::ScreenSz(e::p::SzState(na::Vector2::new(width as f32, height as f32)))
+                .into(),
+            Event::WindowEvent {
+                event: WindowEvent::Refresh,
+                ..
+            } => e::b::V(e::b::Flag::Refresh.into(), e::b::State::DOWN).into(),
+            Event::WindowEvent {
+                event: WindowEvent::CursorEntered { .. },
+                ..
+            } => e::b::V(e::b::Flag::CursorEntered.into(), e::b::State::DOWN).into(),
+            Event::WindowEvent {
+                event: WindowEvent::CursorLeft { .. },
+                ..
+            } => e::b::V(e::b::Flag::CursorEntered.into(), e::b::State::DOWN).into(),
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position: p, .. },
+                ..
+            } => e::p::V::CursorPos(e::p::PosState(as_vec(p))).into(),
+            Event::WindowEvent {
+                event: WindowEvent::Focused(f),
+                ..
+            } => e::b::V(e::b::Flag::Focus.into(), e::b::State::DOWN).into(),
+            Event::DeviceEvent {
+                // Ignored since it's actually a duplicate of the below.
+                event: DeviceEvent::Key(_),
+                ..
+            } => e::V::Ignored,
+            Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { input: k, .. },
+                ..
+            } => parse_keyboard(k),
+            Event::DeviceEvent {
+                event: DeviceEvent::Motion { .. },
+                ..
+            } => e::V::Ignored,
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion { delta: (x, y) },
+                ..
+            } => e::V::Ignored,
+            Event::WindowEvent {
+                event: WindowEvent::AxisMotion { .. },
+                ..
+            } => e::V::Ignored,
+            Event::WindowEvent {
+                event: WindowEvent::ReceivedCharacter(_),
+                ..
+            } => e::V::Ignored,
+            Event::Awakened => e::V::Ignored,
             _ => unimplemented!("Cannot cast {:?} to C.", e),
         };
         trace!("Event {:?} translated to {:?}", e, v);
@@ -119,7 +114,11 @@ fn parse_keyboard(k: KeyboardInput) -> e::V {
     if let Some(vk) = k.virtual_keycode {
         match map_vk(vk) {
             e::b::C::Ignored => e::V::Ignored,
-            c @ _ => e::b::V(c, e::b::State::from(k.state == winit::ElementState::Pressed)).into()
+            c @ _ => e::b::V(
+                c,
+                e::b::State::from(k.state == winit::ElementState::Pressed),
+            )
+            .into(),
         }
     } else {
         // TODO e::b::V(map_sc(k.scancode), e::b::State::from(k.state == winit::ElementState::Pressed)).into()
@@ -219,7 +218,6 @@ fn map_vk(vk: VirtualKeyCode) -> e::b::C {
 
         // The "Compose" key on Linux.
         // VirtualKeyCode::Compose => e::b::Key::Compose.into(),
-
         VirtualKeyCode::Caret => '^'.into(),
 
         VirtualKeyCode::Numlock => e::b::Key::NumLk.into(),
@@ -305,10 +303,9 @@ fn map_vk(vk: VirtualKeyCode) -> e::b::C {
         // VirtualKeyCode::Copy,
         // VirtualKeyCode::Paste,
         // VirtualKeyCode::Cut,
-        _ => e::b::C::Ignored.into()
+        _ => e::b::C::Ignored.into(),
     }
 }
 fn as_vec(p: LogicalPosition) -> na::Vector2<f32> {
     na::Vector2::new(p.x as f32, p.y as f32)
 }
-

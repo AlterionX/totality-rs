@@ -1,11 +1,19 @@
-use crate::layout::Sz;
+use crate::{component::Background, layout::Cfg};
 
-pub enum DrawCmd {
+struct SVG {}
+pub struct Placement {
+    cfg: Cfg,
+    stencil: SVG, // single, closed path svg
+}
+pub struct Span {}
+
+pub struct Cmd(Placement, Content);
+pub enum Content {
     // TODO abstract out 2d draw commands a gui needs
-    Text(String, Sz), Background(),
+    Text(Span),
+    Background(Background),
 }
 
 pub trait Drawer {
-    fn draw(&self, cc: Vec<DrawCmd>);
+    fn draw(&self, cc: Vec<Cmd>);
 }
-

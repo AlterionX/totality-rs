@@ -1,9 +1,12 @@
-use std::{sync::{Arc, RwLock, Mutex}, mem::size_of};
-use super::{Geom, Vertex, VMat, FMat, Model, Face};
-use na::{Matrix3, Vector3, Matrix, U2, U3};
+use super::{FMat, Face, Geom, Model, VMat, Vertex};
+use na::{Matrix, Matrix3, Vector3, U2, U3};
+use std::{
+    mem::size_of,
+    sync::{Arc, Mutex, RwLock},
+};
 
 #[allow(dead_code)]
-use log::{trace, debug, info, warn, error};
+use log::{debug, error, info, trace, warn};
 
 #[derive(Debug)]
 pub struct Static {
@@ -14,14 +17,17 @@ pub struct Dynamic {
     pub mm: Vec<Model>,
 }
 
-
 pub struct Scene(Static, Dynamic);
 impl Scene {
     pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
         (Static { objs: gg }, Dynamic { mm: mm })
     }
-    pub fn split(self) -> (Static, Dynamic) { (self.0, self.1) }
-    pub fn rejoin(st: Static, dy: Dynamic) -> Self { Self(st, dy) }
+    pub fn split(self) -> (Static, Dynamic) {
+        (self.0, self.1)
+    }
+    pub fn rejoin(st: Static, dy: Dynamic) -> Self {
+        Self(st, dy)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -33,7 +39,12 @@ pub struct TriGeom {
     tex_file: Option<String>,
 }
 impl TriGeom {
-    pub fn new(vv: Matrix3<f32>, f: Vector3<u32>, uvs: Vec<[f32; 2]>, texture_file: Option<String>) -> TriGeom {
+    pub fn new(
+        vv: Matrix3<f32>,
+        f: Vector3<u32>,
+        uvs: Vec<[f32; 2]>,
+        texture_file: Option<String>,
+    ) -> TriGeom {
         TriGeom {
             vv: {
                 let mut vv_ = unsafe { VMat::new_uninitialized(3) };
@@ -49,8 +60,8 @@ impl TriGeom {
                 let mut vec_vv = Vec::with_capacity(vv.ncols() * size_of::<Vertex>());
                 for c in 0..vv.ncols() {
                     vec_vv.push(Vertex {
-                            pos: vv.column(c).into(),
-                            uv: uvs[c],
+                        pos: vv.column(c).into(),
+                        uv: uvs[c],
                     });
                 }
                 vec_vv
@@ -61,11 +72,21 @@ impl TriGeom {
     }
 }
 impl Geom for TriGeom {
-    fn verts(&self) -> &VMat { &self.vv }
-    fn faces(&self) -> &FMat { &self.ff }
-    fn unpacked_verts(&self) -> &Vec<Vertex> { &self.vec_vv }
-    fn unpacked_faces(&self) -> &Vec<Face> { &self.vec_ff }
-    fn texture(&self) -> &Option<String> { &self.tex_file }
+    fn verts(&self) -> &VMat {
+        &self.vv
+    }
+    fn faces(&self) -> &FMat {
+        &self.ff
+    }
+    fn unpacked_verts(&self) -> &Vec<Vertex> {
+        &self.vec_vv
+    }
+    fn unpacked_faces(&self) -> &Vec<Face> {
+        &self.vec_ff
+    }
+    fn texture(&self) -> &Option<String> {
+        &self.tex_file
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -83,8 +104,8 @@ impl TriMeshGeom {
                 let mut vec_vv = Vec::with_capacity(vv.ncols() * size_of::<Vertex>());
                 for c in 0..vv.ncols() {
                     vec_vv.push(Vertex {
-                            pos: vv.column(c).into(),
-                            uv: uvs[c],
+                        pos: vv.column(c).into(),
+                        uv: uvs[c],
                     });
                 }
                 vec_vv
@@ -93,7 +114,7 @@ impl TriMeshGeom {
                 let mut vec_ff = Vec::with_capacity(ff.ncols() * size_of::<Face>());
                 for c in 0..ff.ncols() {
                     vec_ff.push(Face {
-                            verts: ff.column(c).into(),
+                        verts: ff.column(c).into(),
                     });
                 }
                 vec_ff
@@ -105,10 +126,19 @@ impl TriMeshGeom {
     }
 }
 impl Geom for TriMeshGeom {
-    fn verts(&self) -> &VMat { &self.vv }
-    fn faces(&self) -> &FMat { &self.ff }
-    fn unpacked_verts(&self) -> &Vec<Vertex> { &self.vec_vv }
-    fn unpacked_faces(&self) -> &Vec<Face> { &self.vec_ff }
-    fn texture(&self) -> &Option<String> { &self.tex_file }
+    fn verts(&self) -> &VMat {
+        &self.vv
+    }
+    fn faces(&self) -> &FMat {
+        &self.ff
+    }
+    fn unpacked_verts(&self) -> &Vec<Vertex> {
+        &self.vec_vv
+    }
+    fn unpacked_faces(&self) -> &Vec<Face> {
+        &self.vec_ff
+    }
+    fn texture(&self) -> &Option<String> {
+        &self.tex_file
+    }
 }
-

@@ -1,23 +1,17 @@
-extern crate nalgebra as na;
 extern crate log;
+extern crate nalgebra as na;
 
-pub mod scene;
 pub mod camera;
+pub mod scene;
 
-use std::{
-    mem::size_of,
-    sync::{Weak, Arc},
-    fmt::Debug,
-};
-use na::{
-    U1, U3, Dynamic,
-    VecStorage,
-    UnitQuaternion,
-    Vector3,
-    Matrix, Matrix4,
-};
 #[allow(dead_code)]
-use log::{trace, info, debug, warn, error};
+use log::{debug, error, info, trace, warn};
+use na::{Dynamic, Matrix, Matrix4, UnitQuaternion, VecStorage, Vector3, U1, U3};
+use std::{
+    fmt::Debug,
+    mem::size_of,
+    sync::{Arc, Weak},
+};
 
 pub type VMat = Matrix<f32, U3, Dynamic, VecStorage<f32, U3, Dynamic>>;
 pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
@@ -27,9 +21,15 @@ pub trait IntersectTestable {
 pub trait Geom: Send + Sync + Debug {
     fn verts(&self) -> &VMat;
     fn faces(&self) -> &FMat;
-    fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat { self.verts().clone() }
-    fn culled_faces(&self, intersect_test: Box<IntersectTestable>) -> FMat { self.faces().clone() }
-    fn vert_cnt(&self) -> usize { self.verts().ncols() }
+    fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat {
+        self.verts().clone()
+    }
+    fn culled_faces(&self, intersect_test: Box<IntersectTestable>) -> FMat {
+        self.faces().clone()
+    }
+    fn vert_cnt(&self) -> usize {
+        self.verts().ncols()
+    }
     fn unpacked_verts(&self) -> &Vec<Vertex>;
     fn unpacked_faces(&self) -> &Vec<Face>;
     fn flattened_verts_as_bytes(&self) -> Vec<u32> {
@@ -53,14 +53,28 @@ pub trait Geom: Send + Sync + Debug {
         }
         flat
     }
-    fn vv_elem_cnt(&self) -> usize { self.verts().ncols() }
-    fn ff_elem_cnt(&self) -> usize { self.faces().ncols() }
-    fn vv_flat_cnt(&self) -> usize { self.vv_elem_cnt() * Vertex::packed_flat_sz() }
-    fn ff_flat_cnt(&self) -> usize { self.ff_elem_cnt() * Face::packed_flat_sz() }
-    fn vv_byte_cnt(&self) -> usize { self.vv_elem_cnt() * Vertex::packed_byte_sz() }
-    fn ff_byte_cnt(&self) -> usize { self.ff_elem_cnt() * Face::packed_byte_sz() }
+    fn vv_elem_cnt(&self) -> usize {
+        self.verts().ncols()
+    }
+    fn ff_elem_cnt(&self) -> usize {
+        self.faces().ncols()
+    }
+    fn vv_flat_cnt(&self) -> usize {
+        self.vv_elem_cnt() * Vertex::packed_flat_sz()
+    }
+    fn ff_flat_cnt(&self) -> usize {
+        self.ff_elem_cnt() * Face::packed_flat_sz()
+    }
+    fn vv_byte_cnt(&self) -> usize {
+        self.vv_elem_cnt() * Vertex::packed_byte_sz()
+    }
+    fn ff_byte_cnt(&self) -> usize {
+        self.ff_elem_cnt() * Face::packed_byte_sz()
+    }
     fn texture(&self) -> &Option<String>;
-    fn has_texture(&self) -> bool { self.texture().is_some() }
+    fn has_texture(&self) -> bool {
+        self.texture().is_some()
+    }
 }
 
 // TODO should this be a trait?
@@ -87,11 +101,18 @@ impl Model {
             source: g.clone(),
             should_render: false,
             children: Option::None,
-            parent: Option::None
+            parent: Option::None,
         }
     }
 
-    pub fn set_state(&mut self, p: Vector3<f32>, v: Vector3<f32>, o: UnitQuaternion<f32>, omg: UnitQuaternion<f32>, scale: f32) {
+    pub fn set_state(
+        &mut self,
+        p: Vector3<f32>,
+        v: Vector3<f32>,
+        o: UnitQuaternion<f32>,
+        omg: UnitQuaternion<f32>,
+        scale: f32,
+    ) {
         self.set_pos(p);
         self.set_vel(v);
         self.set_ori(o);
@@ -118,12 +139,12 @@ impl Model {
         self.should_render = b;
     }
 
-     pub fn mat(&self) -> Matrix4<f32> {
-         let s = self.scale;
-         let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
-         t_mat.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
-         t_mat
-     }
+    pub fn mat(&self) -> Matrix4<f32> {
+        let s = self.scale;
+        let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
+        t_mat.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
+        t_mat
+    }
     pub fn flat_v(&self) -> Vec<f32> {
         self.source.flattened_verts_as_floats()
     }
@@ -150,17 +171,23 @@ impl Vertex {
     pub fn attributes() -> Vec<VertexInfo> {
         let pos = VertexInfo {
             offset: 0,
-            elemsize:  size_of::<[f32; 3]>(),
+            elemsize: size_of::<[f32; 3]>(),
         };
         let uv = VertexInfo {
             offset: size_of::<[f32; 3]>(),
-            elemsize:  size_of::<[f32; 2]>(),
+            elemsize: size_of::<[f32; 2]>(),
         };
         vec![pos, uv]
     }
-    pub fn packed_elem_sz() -> usize { size_of::<u32>() }
-    pub fn packed_flat_sz() -> usize { 5 }
-    pub fn packed_byte_sz() -> usize { Self::packed_flat_sz() * Self::packed_elem_sz() }
+    pub fn packed_elem_sz() -> usize {
+        size_of::<u32>()
+    }
+    pub fn packed_flat_sz() -> usize {
+        5
+    }
+    pub fn packed_byte_sz() -> usize {
+        Self::packed_flat_sz() * Self::packed_elem_sz()
+    }
     fn pack_into(&self, buf: &mut Vec<u32>) {
         for p_d in self.pos.iter() {
             buf.push(p_d.clone().to_bits());
@@ -169,7 +196,9 @@ impl Vertex {
             buf.push(uv_d.clone().to_bits());
         }
     }
-    fn packed_sz_float() -> usize { 5 * size_of::<f32>() }
+    fn packed_sz_float() -> usize {
+        5 * size_of::<f32>()
+    }
     fn pack_into_float(&self, buf: &mut Vec<f32>) {
         for p_d in self.pos.iter() {
             buf.push(p_d.clone());
@@ -191,13 +220,18 @@ impl Face {
         };
         vec![verts]
     }
-    pub fn packed_elem_sz() -> usize { size_of::<u32>() }
-    pub fn packed_flat_sz() -> usize { 3 }
-    pub fn packed_byte_sz() -> usize { Self::packed_flat_sz() * Self::packed_elem_sz() }
+    pub fn packed_elem_sz() -> usize {
+        size_of::<u32>()
+    }
+    pub fn packed_flat_sz() -> usize {
+        3
+    }
+    pub fn packed_byte_sz() -> usize {
+        Self::packed_flat_sz() * Self::packed_elem_sz()
+    }
     fn pack_into(&self, buf: &mut Vec<u32>) {
         for v_i_d in self.verts.iter() {
             buf.push(v_i_d.clone());
         }
     }
 }
-

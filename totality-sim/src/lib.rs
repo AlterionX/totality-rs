@@ -1,23 +1,23 @@
-extern crate totality_threading as th;
-extern crate totality_model as geom;
 extern crate log;
 extern crate nalgebra as na;
+extern crate totality_model as geom;
+extern crate totality_threading as th;
 
 pub mod linkage;
 use linkage::*;
 
-use std::{
-    sync::{Arc, Mutex, Weak, RwLock},
-    time::{Duration},
-    ops::DerefMut,
-};
 use na::UnitQuaternion;
+use std::{
+    ops::DerefMut,
+    sync::{Arc, Mutex, RwLock, Weak},
+    time::Duration,
+};
 
 #[allow(dead_code)]
-use log::{trace, debug, info, warn, error};
+use log::{debug, error, info, trace, warn};
 
 pub trait PhysicsHook<T>: FnMut(&geom::scene::Static, &mut T) + Send + 'static {}
-impl <T, F: FnMut(&geom::scene::Static, &mut T) + Send + 'static> PhysicsHook<T> for F {}
+impl<T, F: FnMut(&geom::scene::Static, &mut T) + Send + 'static> PhysicsHook<T> for F {}
 
 struct Simulation<T: Simulated, DL: DataLinkage<T>> {
     post_cbs: Vec<Box<PhysicsHook<T>>>,
@@ -25,8 +25,8 @@ struct Simulation<T: Simulated, DL: DataLinkage<T>> {
     time_step: Duration,
     dlink: DL,
 }
-unsafe impl <T: Simulated, DL: DataLinkage<T>> Send for Simulation<T, DL> {}
-impl <T: Simulated, DL: DataLinkage<T>> Simulation<T, DL> {
+unsafe impl<T: Simulated, DL: DataLinkage<T>> Send for Simulation<T, DL> {}
+impl<T: Simulated, DL: DataLinkage<T>> Simulation<T, DL> {
     pub fn step(&mut self) {
         trace!("Simulating a single step.");
         // call pre
@@ -34,12 +34,16 @@ impl <T: Simulated, DL: DataLinkage<T>> Simulation<T, DL> {
         if let Some(data) = self.dlink.advance() {
             // actually does exist, so lock and update
             T::step(self.time_step, data.source(), data.target());
-        } else { panic!("Scene corrupted!") };
+        } else {
+            panic!("Scene corrupted!")
+        };
         // call post
     }
     pub fn as_thread(
-        d: Duration, dlink: DL,
-        post_cbs: Vec<Box<PhysicsHook<T>>>, pre_cbs: Vec<Box<PhysicsHook<T>>>
+        d: Duration,
+        dlink: DL,
+        post_cbs: Vec<Box<PhysicsHook<T>>>,
+        pre_cbs: Vec<Box<PhysicsHook<T>>>,
     ) -> Result<th::killable_thread::KillableThread<(), ()>, std::io::Error> {
         th::create_duration_kt!(d, "Simulation", {
             let mut sim = {
@@ -66,9 +70,14 @@ pub struct Manager {
     sim_th: Option<th::killable_thread::KillableThread<(), ()>>,
 }
 impl Manager {
-    pub fn new<T: Simulated, DL: DataLinkage<T>>(d: Duration, dl: DL, post_cbs: Vec<Box<PhysicsHook<T>>>, pre_cbs: Vec<Box<PhysicsHook<T>>>) -> Result<Self, std::io::Error> {
+    pub fn new<T: Simulated, DL: DataLinkage<T>>(
+        d: Duration,
+        dl: DL,
+        post_cbs: Vec<Box<PhysicsHook<T>>>,
+        pre_cbs: Vec<Box<PhysicsHook<T>>>,
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
-            sim_th: Some(Simulation::as_thread(d, dl, post_cbs, pre_cbs)?)
+            sim_th: Some(Simulation::as_thread(d, dl, post_cbs, pre_cbs)?),
         })
     }
 }
@@ -78,4 +87,3 @@ impl Drop for Manager {
         drop(self.sim_th.take());
     }
 }
-

@@ -1,5 +1,5 @@
-mod text_box;
 mod pane;
+mod text_box;
 
-pub use text_box::DisplayTextBox;
 pub use pane::Pane;
+pub use text_box::DisplayTextBox;

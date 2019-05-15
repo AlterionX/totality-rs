@@ -1,29 +1,29 @@
 //! Link together otherwise independent systems together.
 
-use std::{cell::UnsafeCell, sync::{Arc, Mutex}};
+use std::{
+    cell::UnsafeCell,
+    sync::{Arc, Mutex},
+};
 
-use sim::linkage as sl;
+use gui::{draw, linkage as gl};
 use ren::rp as rl;
-use gui::{draw::DrawCmd, linkage as gl};
+use sim::linkage as sl;
 use sync::triple_buffer as tb;
 
-#[allow(dead_code)]
-use log::{debug, warn, error, info, trace};
+#[allow(unused_imports)]
+use log::{debug, error, info, trace, warn};
 
 // gui
 pub struct EventSystemLinkage {
     // TODO register for needed events, possibly prevent other events/link to those systems as well
 }
-impl gl::EventLinkage for EventSystemLinkage {
-}
+impl gl::EventLinkage for EventSystemLinkage {}
 pub struct RenderSystemLinkage {
     // TODO update render state / cache, possibly prevent other events/link to those systems as well
 }
 impl gl::DrawLinkage for RenderSystemLinkage {
-    fn queue_cmd(&self, cmd: DrawCmd) {
-    }
-    fn disptach(&self) {
-    }
+    fn queue_cmd(&self, cmd: draw::Cmd) {}
+    fn disptach(&self) {}
 }
 
 // ren
@@ -64,15 +64,19 @@ impl RenderData {
                     unsafe { (*rv_ptr).replace(tb::Reading::Reader(rv.read())) };
                     if let Some(tb::Reading::Reader(ref r)) = unsafe { &*rv_ptr } {
                         Some(r)
-                    } else { None }
-                },
+                    } else {
+                        None
+                    }
+                }
                 Some(e) => {
                     unsafe { (*rv_ptr).replace(e) };
                     None
-                },
+                }
                 None => None,
             }
-        } else { None }
+        } else {
+            None
+        }
     }
     fn unlock(&self) -> Option<&tb::ReadingView<geom::scene::Dynamic>> {
         if let Some(ref r) = self.opt_rv {
@@ -82,65 +86,84 @@ impl RenderData {
                     unsafe { (*r_ptr).replace(tb::Reading::ReadingView(r.release())) };
                     if let Some(tb::Reading::ReadingView(ref rv)) = unsafe { &*r_ptr } {
                         Some(rv)
-                    } else { None }
-                },
+                    } else {
+                        None
+                    }
+                }
                 Some(e) => {
                     unsafe { (*r_ptr).replace(e) };
                     None
-                },
+                }
                 None => None,
             }
-        } else { None }
+        } else {
+            None
+        }
     }
 }
 impl rl::DataLinkage<ren::IT> for RenderData {
     fn next_req(&self) -> Option<ren::RenderReq<ren::IT>> {
         use ren::*;
-        let dy = if let Some(dy) = self.lock() { dy } else { return None; };
+        let dy = if let Some(dy) = self.lock() {
+            dy
+        } else {
+            return None;
+        };
         let should_depth = *self.should_use_depth.lock().expect("Seriously?");
         let mut restart = self.should_restart_renderer.lock().expect("Seriously?");
         let draw_id = *self.fish.lock().expect("Seriously?");
         let original_color = self.color.lock().expect("Seriously?");
         let cam_clone = self.camera.lock().expect("Camera poisoned!").clone();
-        let st = if let Some(ref st) = self.opt_st { st } else { return None; };
+        let st = if let Some(ref st) = self.opt_st {
+            st
+        } else {
+            return None;
+        };
         let req = if *restart {
-                info!("Sending recreate instruction!");
-                *restart = false;
-                Some(RenderReq::Restart)
+            info!("Sending recreate instruction!");
+            *restart = false;
+            Some(RenderReq::Restart)
         } else if draw_id == 0 {
             let model_clone = dy.r().mm[draw_id as usize].clone();
             Some(RenderReq::DrawGroupWithSetting(
-                vec![model_clone], cam_clone,
+                vec![model_clone],
+                cam_clone,
                 Color(na::Vector4::new(
-                        original_color[0] as f32,
-                        original_color[1] as f32,
-                        original_color[2] as f32,
-                        original_color[3] as f32,
+                    original_color[0] as f32,
+                    original_color[1] as f32,
+                    original_color[2] as f32,
+                    original_color[3] as f32,
                 )),
-                RenderSettings { should_use_depth: should_depth },
+                RenderSettings {
+                    should_use_depth: should_depth,
+                },
             ))
         } else {
             let model_clones = vec![dy.r().mm[1].clone(), dy.r().mm[2].clone()];
             if let Ok(sud_g) = self.should_use_depth.lock() {
                 Some(RenderReq::DrawGroupWithSetting(
-                    model_clones, cam_clone,
+                    model_clones,
+                    cam_clone,
                     Color(na::Vector4::new(
-                            original_color[0] as f32,
-                            original_color[1] as f32,
-                            original_color[2] as f32,
-                            original_color[3] as f32,
+                        original_color[0] as f32,
+                        original_color[1] as f32,
+                        original_color[2] as f32,
+                        original_color[3] as f32,
                     )),
-                    RenderSettings { should_use_depth: *sud_g },
+                    RenderSettings {
+                        should_use_depth: *sud_g,
+                    },
                 ))
             } else {
                 Some(RenderReq::DrawGroup(
-                    model_clones, cam_clone,
+                    model_clones,
+                    cam_clone,
                     ren::Color(na::Vector4::new(
-                            original_color[0] as f32,
-                            original_color[1] as f32,
-                            original_color[2] as f32,
-                            original_color[3] as f32,
-                    ))
+                        original_color[0] as f32,
+                        original_color[1] as f32,
+                        original_color[2] as f32,
+                        original_color[3] as f32,
+                    )),
                 ))
             }
         };
@@ -160,7 +183,12 @@ impl SimulatedScene {
 impl sl::Simulated for SimulatedScene {
     fn step(step: std::time::Duration, source: &Self, target: &mut Self) {
         let step = Self::dur_as_f64(&step) as f32;
-        for (r_ele, w_ele) in unsafe { (*source.1).mm.iter().zip((*(target.1 as *mut geom::scene::Dynamic)).mm.iter_mut()) } {
+        for (r_ele, w_ele) in unsafe {
+            (*source.1)
+                .mm
+                .iter()
+                .zip((*(target.1 as *mut geom::scene::Dynamic)).mm.iter_mut())
+        } {
             w_ele.set_state(
                 r_ele.pos + r_ele.vel * step,
                 r_ele.vel,
@@ -168,7 +196,7 @@ impl sl::Simulated for SimulatedScene {
                 r_ele.omg,
                 r_ele.scale,
             );
-        };
+        }
     }
 }
 pub struct SimData {
@@ -196,44 +224,54 @@ impl sl::DataLinkage<SimulatedScene> for SimData {
                 // update _sc_m, _sc_p
                 if let Some(tb::Editing::Editor(ref dy)) = unsafe { &*self.e_state.get() } {
                     unsafe {
-                        (*self._sc_c.get()).replace(SimulatedScene(self.arc_st.clone(), dy.r() as *const geom::scene::Dynamic));
-                        (*self._sc_m.get()).replace(SimulatedScene(self.arc_st.clone(), dy.w() as *const geom::scene::Dynamic));
+                        (*self._sc_c.get()).replace(SimulatedScene(
+                            self.arc_st.clone(),
+                            dy.r() as *const geom::scene::Dynamic,
+                        ));
+                        (*self._sc_m.get()).replace(SimulatedScene(
+                            self.arc_st.clone(),
+                            dy.w() as *const geom::scene::Dynamic,
+                        ));
                     };
                     Some(sl::DataLinkageGuard::new(self))
-                } else { None }
-            },
+                } else {
+                    None
+                }
+            }
             Some(e) => {
                 error!("Attempting to lock Editor without unlocking!");
                 unsafe { (*s).replace(e) };
                 None
-            },
+            }
             None => None,
         }
     }
     fn source(&self) -> Option<&SimulatedScene> {
         match unsafe { &*self._sc_c.get() } {
             Some(ref sc) => Some(sc),
-            None => None
+            None => None,
         }
     }
     fn target(&self) -> Option<&mut SimulatedScene> {
         match unsafe { &mut *self._sc_m.get() } {
             Some(ref mut sc) => Some(sc),
-            None => None
+            None => None,
         }
     }
     fn cleanup(&self) {
         let s = self.e_state.get();
-        unsafe { match (*s).take() {
-            Some(tb::Editing::Editor(e)) => {
-                (*s).replace(tb::Editing::EditingView(e.release()));
-            },
-            Some(e) => {
-                error!("Attempting to unlock Editor without locking!");
-                std::mem::forget((*s).replace(e));
-            },
-            None => ()
-        } }
+        unsafe {
+            match (*s).take() {
+                Some(tb::Editing::Editor(e)) => {
+                    (*s).replace(tb::Editing::EditingView(e.release()));
+                }
+                Some(e) => {
+                    error!("Attempting to unlock Editor without locking!");
+                    std::mem::forget((*s).replace(e));
+                }
+                None => (),
+            }
+        }
     }
 }
 unsafe impl Send for SimData {}

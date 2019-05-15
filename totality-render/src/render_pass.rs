@@ -1,12 +1,11 @@
 // static commands
 // data load
 // semaphore acquisition
-pub struct DrawPass {
-}
+pub struct DrawPass {}
 
 pub struct Node {
     // data: Vec<Id>,
-    // inputs: Vec<Id>,
+// inputs: Vec<Id>,
 }
 
 // create graph

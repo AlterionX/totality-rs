@@ -7,5 +7,9 @@ pub type CBFn = ();
 pub type CB = ();
 
 pub enum E {
-    Hover, Click, Dropped(String), Scroll, Key(e::b::Key)
+    Hover,
+    Click,
+    Dropped(String),
+    Scroll,
+    Key(e::b::Key),
 }
