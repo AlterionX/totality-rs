@@ -13,3 +13,7 @@ members = [
     "totality-threading",   # threading
     # "totality-math",        # simple maths tbi(mplemented) for when nalgebra is gets too goddamn fucking bitchy about things
 ]
+
+[profile.dev]
+panic = "abort"
+

@@ -1188,6 +1188,7 @@ dependencies = [
  "totality-model 0.1.0",
  "totality-render 0.1.0",
  "totality-sim 0.1.0",
+ "totality-sync 0.1.0",
  "totality-threading 0.1.0",
 ]
 
@@ -1227,7 +1228,6 @@ version = "0.1.0"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "totality-sync 0.1.0",
 ]
 
 [[package]]
@@ -1256,6 +1256,7 @@ dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "totality-model 0.1.0",
+ "totality-sync 0.1.0",
  "totality-threading 0.1.0",
 ]
 

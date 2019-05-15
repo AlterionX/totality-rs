@@ -198,6 +198,7 @@ impl Manager {
 }
 impl Drop for Manager {
     fn drop(&mut self) {
+        info!("Shutting down system management.");
         drop(self.pollers.take())
     }
 }

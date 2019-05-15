@@ -1,4 +1,3 @@
-extern crate totality_sync as sync;
 extern crate nalgebra as na;
 extern crate log;
 
@@ -8,14 +7,14 @@ pub mod camera;
 use std::{
     mem::size_of,
     sync::{Weak, Arc},
+    fmt::Debug,
 };
 use na::{
     U1, U3, Dynamic,
-    Vector3,
-    UnitQuaternion, Point3,
-    Rotation3, Isometry3, Translation3,
-    Matrix, Matrix4,
     VecStorage,
+    UnitQuaternion,
+    Vector3,
+    Matrix, Matrix4,
 };
 #[allow(dead_code)]
 use log::{trace, info, debug, warn, error};
@@ -25,7 +24,7 @@ pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
 pub trait IntersectTestable {
     fn intersects(&self, t: Box<Geom>) -> Option<()>;
 }
-pub trait Geom: Send + Sync {
+pub trait Geom: Send + Sync + Debug {
     fn verts(&self) -> &VMat;
     fn faces(&self) -> &FMat;
     fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat { self.verts().clone() }
@@ -65,7 +64,7 @@ pub trait Geom: Send + Sync {
 }
 
 // TODO should this be a trait?
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Model {
     pub pos: Vector3<f32>,
     pub vel: Vector3<f32>,

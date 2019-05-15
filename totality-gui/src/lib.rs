@@ -2,6 +2,8 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate totality_model as geom;
+extern crate log;
+
 // exports
 pub mod color;
 pub mod draw;
@@ -16,6 +18,9 @@ use linkage::*;
 use draw::Drawer;
 use layout::{Sz, Pos};
 use components::{Component, Id};
+
+#[allow(dead_code)]
+use log::{trace, debug, info, warn, error};
 
 pub struct Core<EL: EventLinkage, DL: DrawLinkage> {
     drawing_area: Sz,
@@ -50,5 +55,17 @@ impl <EL: EventLinkage, DL: DrawLinkage> Core<EL, DL> {
     }
 }
 
-// Implementation
+pub struct Manager {
+}
+impl Manager {
+    pub fn new() -> Self { Self { } }
+    pub fn dispatch_draw(&self) {}
+}
+impl Drop for Manager {
+    fn drop(&mut self) {
+        info!("Shutting down gui systems.");
+    }
+}
+
+// Sample implementations / reusable components
 pub mod base_components;

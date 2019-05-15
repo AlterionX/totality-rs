@@ -1,39 +1,30 @@
 use std::{sync::{Arc, RwLock, Mutex}, mem::size_of};
 use super::{Geom, Vertex, VMat, FMat, Model, Face};
 use na::{Matrix3, Vector3, Matrix, U2, U3};
-use sync::TripleBuffer;
 
 #[allow(dead_code)]
 use log::{trace, debug, info, warn, error};
 
+#[derive(Debug)]
 pub struct Static {
     pub objs: Vec<Arc<Box<Geom>>>,
 }
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Dynamic {
     pub mm: Vec<Model>,
 }
 
-pub struct Scene {
-    pub statics: Arc<Static>,
-    pub dynamics: TripleBuffer<Dynamic>,
-}
+
+pub struct Scene(Static, Dynamic);
 impl Scene {
-    pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> Scene {
-        Scene {
-            statics: Arc::new(Static { objs: gg }),
-            dynamics: TripleBuffer::new(Dynamic { mm: mm.clone() }),
-        }
+    pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
+        (Static { objs: gg }, Dynamic { mm: mm })
     }
-    pub fn snatch(&self) -> Arc<RwLock<Dynamic>> {
-        self.dynamics.snatch()
-    }
-    pub fn advance(&self) -> (Arc<RwLock<Dynamic>>, Arc<RwLock<Dynamic>>) {
-        self.dynamics.advance()
-    }
+    pub fn split(self) -> (Static, Dynamic) { (self.0, self.1) }
+    pub fn rejoin(st: Static, dy: Dynamic) -> Self { Self(st, dy) }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TriGeom {
     vv: VMat,
     ff: FMat,
@@ -77,7 +68,7 @@ impl Geom for TriGeom {
     fn texture(&self) -> &Option<String> { &self.tex_file }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TriMeshGeom {
     vv: VMat,
     ff: FMat,

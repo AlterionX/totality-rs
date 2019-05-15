@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 totality-threading = { path = "../totality-threading" }
+totality-sync = { path = "../totality-sync" }
 totality-model = { path = "../totality-model" }
 nalgebra = "0.18.0"
 log = "0.4.6"

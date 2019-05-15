@@ -31,6 +31,8 @@ extern crate image as img;
 mod shaders;
 mod buffers;
 mod texture;
+pub mod render_pass;
+pub use render_pass as rp;
 
 use std::{
     ops::DerefMut,
@@ -53,10 +55,11 @@ use av::ArrayVec;
 use na::Vector4;
 use winit::Window;
 use th::killable_thread::KillableThread;
-use model::{self as geom, scene::Scene};
+use model as geom;
 use buffers::{AllocatedBuffer, LoadedBuffer};
 use shaders::{ShaderInfo, CompiledShader};
 use texture::LoadedImage;
+use rp::DataLinkage;
 
 #[allow(dead_code)]
 use log::{error, warn, info, debug, trace};
@@ -724,8 +727,8 @@ impl<B: Backend<Device=D>, D: Device<B>, I: Instance<Backend=B>> Renderer<I> {
             let clear_values = [ClearValue::Color(ClearColor::Float(color))];
             buffer.begin(false);
             buffer.begin_render_pass_inline(
-                &self.render_pass,
-                &self.framebuffers[img_idx_usize],
+                &self.render_pass_no_depth,
+                &self.framebuffers_no_depth[img_idx_usize],
                 self.render_area,
                 clear_values.iter(),
             );
@@ -1163,49 +1166,76 @@ impl <I: Instance> Drop for Renderer<I> {
 }
 
 pub struct RenderStage<I: Instance> {
-    // update_rx: Receiver<geom::Frame>,
-    scene: Arc<RwLock<Option<Scene>>>,
-    render_thread: Option<KillableThread<RenderReq<I>, ()>>,
+    req_tx: Sender<RenderReq<I>>,
+    render_thread: Option<KillableThread<(), ()>>,
 }
 impl <I: Instance> RenderStage<I> {
-    fn start_render_thread<F: RendererCreator<I>>(w: Arc<Window>, f: F) -> KillableThread<RenderReq<I>, ()> {
-        th::create_waiting_kt!("Render Stage", {
+    fn start_render_thread<F: RendererCreator<I>, DL: DataLinkage<I>>(w: Arc<Window>, f: F, rx: Receiver<RenderReq<I>>, dl: DL) -> KillableThread<(), ()> {
+        th::create_kt!("Render Stage", {
             let mut r = f(&*w).expect("Fuck. Couldn't even create a thingy-thing.");
-        }, |req| {
-            if let RenderReq::Restart = req {
-                info!("Recreating renderer!");
-                drop(r);
-                r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
-                info!("Renderer recreated!");
-            } else {
-                match Renderer::handle_req(&mut r, req) {
-                    Ok(_) => (),
-                    Err(s) => {
+        }, {
+            match rx.try_recv() {
+                Ok(req) => {
+                    if let RenderReq::Restart = req {
                         info!("Recreating renderer!");
-                        error!("Error ({:?}) while handling request. Attempting recovery...", s);
                         drop(r);
                         r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
                         info!("Renderer recreated!");
+                    } else {
+                        match Renderer::handle_req(&mut r, req) {
+                            Ok(_) => (),
+                            Err(s) => {
+                                info!("Recreating renderer!");
+                                error!("Error ({:?}) while handling request. Attempting recovery...", s);
+                                drop(r);
+                                r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                                info!("Renderer recreated!");
+                            }
+                        }
                     }
-                }
+                },
+                Err(TryRecvError::Empty) => {
+                    if let Some(req) = dl.next_req() {
+                        if let RenderReq::Restart = req {
+                            info!("Recreating renderer!");
+                            drop(r);
+                            r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                            info!("Renderer recreated!");
+                        } else {
+                            match Renderer::handle_req(&mut r, req) {
+                                Ok(_) => (),
+                                Err(s) => {
+                                    info!("Recreating renderer!");
+                                    error!("Error ({:?}) while handling request. Attempting recovery...", s);
+                                    drop(r);
+                                    r = f(&*w).expect("Fuck. Couldn't create a thingy-thing after the first time.");
+                                    info!("Renderer recreated!");
+                                }
+                            }
+                        }
+                    }
+                },
+                Err(TryRecvError::Disconnected) => {},
             }
         }, {}).expect("Could not start render thread.... Welp I'm out.")
     }
-    fn new<F: RendererCreator<I>>(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>, f: F) -> RenderStage<I> {
+    fn new<F: RendererCreator<I>, DL: DataLinkage<I>>(dl: DL, w: Arc<Window>, f: F) -> RenderStage<I> {
+        let (tx, rx) = channel();
         RenderStage {
-            scene: sc_arc,
-            render_thread: Option::Some(Self::start_render_thread(w, f)),
+            req_tx: tx,
+            render_thread: Option::Some(Self::start_render_thread(w, f, rx, dl)),
         }
     }
     pub fn send_cmd(&self, q: RenderReq<I>) -> Result<(), SendError<RenderReq<I>>> {
         if let Some(ref ren) = self.render_thread {
-            ren.send(q)
+            self.req_tx.send(q)
         } else { Err(SendError(q)) }
     }
 }
 impl <I: Instance> Drop for RenderStage<I> {
     fn drop(&mut self) {
-        drop(self.render_thread.take())
+        info!("Shutting down rendering systems.");
+        drop(self.render_thread.take());
     }
 }
 
@@ -1221,8 +1251,8 @@ impl TypedRenderer {
     }
 }
 impl TypedRenderStage {
-    pub fn create(sc_arc: Arc<RwLock<Option<Scene>>>, w: Arc<Window>) -> TypedRenderStage {
-        TypedRenderStage::new(sc_arc, w, |w: &Window| -> Result<TypedRenderer, &'static str> {
+    pub fn create<DL: DataLinkage<IT>>(dl: DL, w: Arc<Window>) -> TypedRenderStage {
+        TypedRenderStage::new(dl, w, |w: &Window| -> Result<TypedRenderer, &'static str> {
             TypedRenderer::create(w)
         })
     }

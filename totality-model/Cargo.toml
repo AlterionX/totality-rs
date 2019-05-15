@@ -5,7 +5,6 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-totality-sync = { path = "../totality-sync" }
 nalgebra = "0.18.0"
 log = "0.4.6"
 

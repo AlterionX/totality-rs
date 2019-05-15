@@ -14,6 +14,7 @@ totality-gui = { path = "../totality-gui" }
 totality-events = { path = "../totality-events" }
 totality-model = { path = "../totality-model" }
 totality-threading = { path = "../totality-threading" }
+totality-sync = { path = "../totality-sync" }
 # imports
 nalgebra = "0.18.0"
 log = "0.4.6"

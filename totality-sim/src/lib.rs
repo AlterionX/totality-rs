@@ -3,6 +3,9 @@ extern crate totality_model as geom;
 extern crate log;
 extern crate nalgebra as na;
 
+pub mod linkage;
+use linkage::*;
+
 use std::{
     sync::{Arc, Mutex, Weak, RwLock},
     time::{Duration},
@@ -13,51 +16,35 @@ use na::UnitQuaternion;
 #[allow(dead_code)]
 use log::{trace, debug, info, warn, error};
 
-pub trait PhysicsHook: FnMut(&geom::scene::Static, &mut geom::scene::Dynamic) + Send + 'static {}
-impl <F: FnMut(&geom::scene::Static, &mut geom::scene::Dynamic) + Send + 'static> PhysicsHook for F {}
+pub trait PhysicsHook<T>: FnMut(&geom::scene::Static, &mut T) + Send + 'static {}
+impl <T, F: FnMut(&geom::scene::Static, &mut T) + Send + 'static> PhysicsHook<T> for F {}
 
-struct Simulation {
-    scene: Arc<RwLock<Option<geom::scene::Scene>>>,
-    post_cbs: Vec<Box<PhysicsHook>>,
-    pre_cbs: Vec<Box<PhysicsHook>>,
+struct Simulation<T: Simulated, DL: DataLinkage<T>> {
+    post_cbs: Vec<Box<PhysicsHook<T>>>,
+    pre_cbs: Vec<Box<PhysicsHook<T>>>,
     time_step: Duration,
+    dlink: DL,
 }
-unsafe impl Send for Simulation {}
-impl Simulation {
-    fn dur_as_f64(d: &Duration) -> f64 {
-        (d.as_secs() as f64) + (d.subsec_nanos() as f64) / 1_000_000_000f64
-    }
+unsafe impl <T: Simulated, DL: DataLinkage<T>> Send for Simulation<T, DL> {}
+impl <T: Simulated, DL: DataLinkage<T>> Simulation<T, DL> {
     pub fn step(&mut self) {
-        let step = Self::dur_as_f64(&self.time_step) as f32;
-        trace!("Step: {:?}", step);
+        trace!("Simulating a single step.");
         // call pre
         // simulate
-        let opt = if let Ok(k) = self.scene.read() {
-            if let Some(ref sc) = *k {
-                Some(sc.advance())
-            } else { None }
-        } else { panic!("Scene corrupted!") };
-        if let Some((r, w)) = opt {
+        if let Some(data) = self.dlink.advance() {
             // actually does exist, so lock and update
-            if let (Ok(r), Ok(mut w)) = (r.read(), w.write()) {
-                for (r_ele, w_ele) in (*r).mm.iter().zip((w.deref_mut()).mm.iter_mut()) {
-                    w_ele.set_state(
-                        r_ele.pos + r_ele.vel * step,
-                        r_ele.vel,
-                        r_ele.ori * UnitQuaternion::identity().nlerp(&r_ele.omg, step),
-                        r_ele.omg,
-                        r_ele.scale,
-                    );
-                };
-            };
-        };
+            T::step(self.time_step, data.source(), data.target());
+        } else { panic!("Scene corrupted!") };
         // call post
     }
-    pub fn as_thread(d: Duration, sc: Arc<RwLock<Option<geom::scene::Scene>>>, post_cbs: Vec<Box<PhysicsHook>>, pre_cbs: Vec<Box<PhysicsHook>>) -> Result<th::killable_thread::KillableThread<(), ()>, std::io::Error> {
+    pub fn as_thread(
+        d: Duration, dlink: DL,
+        post_cbs: Vec<Box<PhysicsHook<T>>>, pre_cbs: Vec<Box<PhysicsHook<T>>>
+    ) -> Result<th::killable_thread::KillableThread<(), ()>, std::io::Error> {
         th::create_duration_kt!(d, "Simulation", {
             let mut sim = {
                 Simulation {
-                    scene: sc.clone(),
+                    dlink,
                     post_cbs: post_cbs,
                     pre_cbs: pre_cbs,
                     time_step: d,
@@ -75,18 +62,19 @@ impl Simulation {
     }
 }
 
-pub struct SimulationManager {
+pub struct Manager {
     sim_th: Option<th::killable_thread::KillableThread<(), ()>>,
 }
-impl SimulationManager {
-    pub fn new(d: Duration, sc: Arc<RwLock<Option<geom::scene::Scene>>>, post_cbs: Vec<Box<PhysicsHook>>, pre_cbs: Vec<Box<PhysicsHook>>) -> Result<SimulationManager, std::io::Error> {
-        Ok(SimulationManager {
-            sim_th: Some(Simulation::as_thread(d, sc, post_cbs, pre_cbs)?)
+impl Manager {
+    pub fn new<T: Simulated, DL: DataLinkage<T>>(d: Duration, dl: DL, post_cbs: Vec<Box<PhysicsHook<T>>>, pre_cbs: Vec<Box<PhysicsHook<T>>>) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            sim_th: Some(Simulation::as_thread(d, dl, post_cbs, pre_cbs)?)
         })
     }
 }
-impl Drop for SimulationManager {
+impl Drop for Manager {
     fn drop(&mut self) {
+        info!("Shutting down simulation systems.");
         drop(self.sim_th.take());
     }
 }

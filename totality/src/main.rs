@@ -2,16 +2,17 @@ extern crate nalgebra as na;
 extern crate simple_logger;
 extern crate log;
 
-extern crate totality_render as sys;
+extern crate totality_render as ren;
 extern crate totality_sim as sim;
 extern crate totality_io as io;
 extern crate totality_events as events;
 extern crate totality_model as geom;
 extern crate totality_threading as th;
 extern crate totality_gui as gui;
+extern crate totality_sync as sync;
 
-mod gui_linkage;
-use gui_linkage as gui_link;
+mod link;
+use link::*;
 
 use std::{
     option::Option,
@@ -21,11 +22,12 @@ use std::{
 };
 use na::{Matrix, Matrix3, U2, U3, Dynamic, UnitQuaternion};
 use geom::{Model, scene::{Scene, TriGeom}};
+use sync::triple_buffer as tb;
 use io::cb_arc;
 use events::cb::ValueStore;
 use events::hal as e;
 use e::{C, V, a, p, b};
-use sys::{Color, RenderReq, TypedRenderStage, RenderSettings};
+use ren::{Color, RenderReq, TypedRenderStage, RenderSettings};
 use gui::{Core as GUI, base_components::{Pane, DisplayTextBox}};
 
 #[allow(dead_code)]
@@ -58,12 +60,11 @@ impl Config {
 enum Action { Continue, Exit, }
 
 struct State {
-    sc: Arc<RwLock<Option<Scene>>>,
     // r: std::Vec<disp::Renderer>, // think about this one a bit more
-    ren: Option<TypedRenderStage>,
-    sys: Option<io::Manager>, // TODO check mutability constraints
-    sim: Option<sim::SimulationManager>,
-    gui: Option<GUI<gui_link::EventSystemLinkage, gui_link::RenderSystemLinkage>>,
+    ren: TypedRenderStage,
+    sys: io::Manager, // TODO check mutability constraints
+    sim: sim::Manager,
+    gui: gui::Manager,
     c: Config,
     // shutdown flow
     shutdown: Arc<Mutex<io::CBFn>>,
@@ -135,11 +136,14 @@ impl State {
         box1_model.set_omg(UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), 1.0));
         box1_model.set_scale(1.);
         box1_model.set_pos(na::Vector3::new(0., -0.5, 0.));
-        let sc = Arc::new(RwLock::new(Some(geom::scene::Scene::new(
-            vec![c_tri0.clone(), c_box.clone()],
-            vec![geom::Model::from_geom(c_tri0.clone()), box0_model, box1_model]
-        ))));
-        let renderer = Option::Some(TypedRenderStage::create(sc.clone(), sm.win.clone()));
+        let (arc_sc_s, rv_sc_d, ev_sc_d) = {
+            let (s, d) = geom::scene::Scene::new(
+                vec![c_tri0.clone(), c_box.clone()],
+                vec![geom::Model::from_geom(c_tri0.clone()), box0_model, box1_model]
+            );
+            let (rv, ev) = tb::buffer(d);
+            (Arc::new(s), rv, ev)
+        };
         // set up shutdown flow
         let c_act = Arc::new(Mutex::new(Action::Continue));
         let cb_shutdown = {
@@ -266,13 +270,11 @@ impl State {
         // sm.reg_per(b::C::A('n').into(), cb_rotor.clone());
         info!("Finished initial setup.");
         let sim_step = Duration::from_secs(1).checked_div(120).expect("Shouldn't be anything wrong here.");
-        let sim = Some(sim::SimulationManager::new(sim_step, sc.clone(), vec![], vec![]).expect("Could not create Simulation!"));
         State {
-            sc: sc,
-            ren: renderer,
-            sys: Some(sm),
-            sim: sim,
-            gui: None,
+            ren: TypedRenderStage::create(link::RenderData::new(Some(rv_sc_d), Some(arc_sc_s.clone()), c_should_use_depth.clone(), c_restart_render.clone(), c_fish.clone(), c_color.clone(), cam.clone()), sm.win.clone()),
+            sys: sm,
+            sim: sim::Manager::new(sim_step, link::SimData::new(arc_sc_s, tb::Editing::EditingView(ev_sc_d)), vec![], vec![]).expect("Could not create Simulation!"),
+            gui: gui::Manager::new(),
             c: cfg,
             // shutdown flow
             shutdown: cb_shutdown,
@@ -301,74 +303,8 @@ impl State {
         // working
         // TODO render
         // render(&mut self.r, &self.sc).expect("Nothing should be wrong yet...");
-        let original_color = self.color.lock().expect("Seriously?");
-        let draw_id = *self.fish.lock().expect("Seriously?");
-        let cam_clone = (*if let Ok(ref cam) = self.camera.lock() { cam } else { panic!("Camera poisoned!") }).clone();
-        let rs_ref = if let Some(ref ren) = self.ren { ren } else { return Action::Continue; };
-        if let Ok(ref sc_g) = self.sc.read() {
-            let dyns = if let Some(ref sc) = **sc_g {
-                sc.snatch()
-            } else { panic!("The scene mutex is poisoned.") };
-            if let Ok(mm_g) = dyns.read() {
-                if draw_id == 0 {
-                    let model_clone = mm_g.mm[draw_id as usize].clone();
-                    if let Ok(sud_g) = self.should_use_depth.lock() {
-                        rs_ref.send_cmd(RenderReq::DrawGroupWithSetting(
-                            vec![model_clone], cam_clone,
-                            Color(na::Vector4::new(
-                                    original_color[0] as f32,
-                                    original_color[1] as f32,
-                                    original_color[2] as f32,
-                                    original_color[3] as f32,
-                            )),
-                            RenderSettings { should_use_depth: *sud_g },
-                        )).expect("No problems expected.");
-                    } else {
-                        rs_ref.send_cmd(RenderReq::Draw(
-                            model_clone, cam_clone,
-                            Color(na::Vector4::new(
-                                    original_color[0] as f32,
-                                    original_color[1] as f32,
-                                    original_color[2] as f32,
-                                    original_color[3] as f32,
-                            ))
-                        )).expect("No problems expected.");
-                    }
-                } else {
-                    let model_clones = vec![mm_g.mm[1].clone(), mm_g.mm[2].clone()];
-                    if let Ok(sud_g) = self.should_use_depth.lock() {
-                        rs_ref.send_cmd(RenderReq::DrawGroupWithSetting(
-                            model_clones, cam_clone,
-                            Color(na::Vector4::new(
-                                    original_color[0] as f32,
-                                    original_color[1] as f32,
-                                    original_color[2] as f32,
-                                    original_color[3] as f32,
-                            )),
-                            RenderSettings { should_use_depth: *sud_g },
-                        )).expect("No problems expected.");
-                    } else {
-                        rs_ref.send_cmd(RenderReq::DrawGroup(
-                            model_clones, cam_clone,
-                            Color(na::Vector4::new(
-                                    original_color[0] as f32,
-                                    original_color[1] as f32,
-                                    original_color[2] as f32,
-                                    original_color[3] as f32,
-                            ))
-                        )).expect("No problems expected.");
-                    }
-                }
-            };
-        }
-        if let Ok(mut srr_g) = self.should_restart_renderer.lock() {
-            if *srr_g {
-                info!("Sending recreate instruction!");
-                rs_ref.send_cmd(RenderReq::Restart).expect("No problems expected.");
-                *srr_g = false;
-            }
-        }
-        if let Some(ref gui) = self.gui { gui.dispatch_draw(); }
+        self.gui.dispatch_draw();
+        // self.ren.send_cmd(ren::RenderReq::Clear(ren::Color(na::Vector4::new(1., 1., 1., 1.)))); // NOTE this still works!
         // Every <variable> invocations
         // TODO run cold logic
         // possibly do above 2 steps in lock step
@@ -378,14 +314,7 @@ impl State {
 }
 impl Drop for State {
     fn drop(&mut self) {
-        info!("Shutting down simulation systems.");
-        drop(self.sim.take());
-        info!("Shutting down gui systems.");
-        drop(self.gui.take());
-        info!("Shutting down system management.");
-        drop(self.sys.take());
-        info!("Shutting down rendering systems.");
-        drop(self.ren.take());
+        info!("Shutting down all systems.");
     }
 }
 
