@@ -19,23 +19,17 @@ fn tb_swap_edit(ev: &mut Option<tb::EditingView<Vec<u8>>>) {
 }
 fn tb_heavy() {
     let (rv, ev) = tb_create(1_000_000_000);
-    print!("Editor starting up.");
     let e_th = std::thread::spawn(move || {
-        print!("Editor starting up.");
         let mut ev = Some(ev);
         let mut e = None;
-        let mut scratch = 0;
-        for i in 0..7 {
-            print!("Editor running iteration: {:?}", i);
+        for _ in 0..7 {
             e.replace(ev.take().unwrap().edit());
             // do some editing
             let e_int = e.as_ref().unwrap();
             for (rv, ev) in e_int.r().iter().zip(e_int.w().iter_mut()) {
                 *ev = *rv + 1;
-                scratch = *ev;
             }
             ev.replace(e.take().unwrap().release());
-            println!("Editor: {:?}", scratch);
         }
     });
     let r_th = std::thread::spawn(move || {
@@ -49,10 +43,9 @@ fn tb_heavy() {
                 scratch = *v;
             }
             rv.replace(r.take().unwrap().release());
-            if scratch == 6 {
+            if scratch == 7 {
                 break
             }
-            // println!("Reader: {:?}", scratch);
         }
     });
     e_th.join().expect("Failed to join editing thread.");
@@ -60,7 +53,6 @@ fn tb_heavy() {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    println!("Benchmark starting up.");
     tb_heavy();
     c.bench_function("Creation", |b| b.iter(|| tb_create(black_box(5000))));
     let (rv, ev) = tb_create(1_000_000_000);
