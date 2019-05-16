@@ -7,3 +7,10 @@ edition = "2018"
 [dependencies]
 log = "0.4.6"
 
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "my_bench"
+harness = false
+
