@@ -17,3 +17,6 @@ members = [
 [profile.dev]
 panic = "abort"
 
+[profile.bench]
+panic = "abort"
+

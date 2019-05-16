@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use criterion::{Criterion, black_box, Fun};
+use criterion::{Criterion, black_box};
 
 extern crate totality_sync as sync;
 use sync::triple_buffer as tb;
@@ -22,7 +22,7 @@ fn tb_light() {
     let e_th = std::thread::spawn(move || {
         let mut ev = Some(ev);
         let mut e = None;
-        for _ in 0..7 {
+        for _ in 0..255 {
             e.replace(ev.take().unwrap().edit());
             // do some editing
             let e_int = e.as_ref().unwrap();
@@ -43,7 +43,7 @@ fn tb_light() {
                 scratch = *v;
             }
             rv.replace(r.take().unwrap().release());
-            if scratch == 7 {
+            if scratch == 255 {
                 break
             }
         }
@@ -87,14 +87,13 @@ fn tb_heavy() {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    tb_heavy();
-    c.bench_function("Creation", |b| b.iter(|| tb_create(black_box(5000))));
+    c.bench_function("0. Creation", |b| b.iter(|| tb_create(black_box(5000))));
     let (rv, ev) = tb_create(1_000_000_000);
     let (mut rv, mut ev) = (Some(rv), Some(ev));
-    c.bench_function("Reading Usage", move |b| b.iter(|| tb_swap_read(&mut rv)));
-    c.bench_function("Editing Usage", move |b| b.iter(|| tb_swap_edit(&mut ev)));
-    c.bench_function("Light Usage", |b| b.iter(|| tb_light()));
-    // c.bench_function("Heavy Usage", |b| b.iter(|| tb_heavy()));
+    c.bench_function("1. Reading Usage", move |b| b.iter(|| tb_swap_read(&mut rv)));
+    c.bench_function("2. Editing Usage", move |b| b.iter(|| tb_swap_edit(&mut ev)));
+    c.bench_function("3. Light Usage", |b| b.iter(|| tb_light()));
+    // c.bench_function("4. Heavy Usage", |b| b.iter(|| tb_heavy()));
 }
 
 criterion_group!(benches, criterion_benchmark);

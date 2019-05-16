@@ -1,6 +1,7 @@
 use std::{
     fmt::Debug,
-    sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize},},
+    sync::{Arc, atomic::{AtomicBool, AtomicUsize},},
+    cell::UnsafeCell,
 };
 
 #[allow(unused_imports)]
@@ -69,7 +70,7 @@ impl Default for TripleBufferIndices {
 
 #[derive(Debug)]
 struct TripleBuffer<T: Clone + Debug> {
-    ii: Mutex<TripleBufferIndices>,
+    ii: UnsafeCell<TripleBufferIndices>,
     backing_mem: *const [T; 3],
     tt: [*mut T; 3],
 }
@@ -88,46 +89,31 @@ impl<T: Clone + Debug> TripleBuffer<T> {
             }
         }
         let arc = Arc::new(Self {
-            ii: Mutex::new(TripleBufferIndices::default()),
+            ii: UnsafeCell::new(TripleBufferIndices::default()),
             backing_mem,
             tt,
         });
         (ReadingView(arc.clone()), EditingView(arc))
     }
     fn snatch(&self) {
-        if let Ok(mut ii) = self.ii.lock() {
-            ii.snatch();
-        } else {
-            panic!("Poisoned buffer indices!");
-        }
+        let ii = self.ii.get();
+        unsafe { (*ii).snatch() };
     }
     fn advance(&self) {
-        if let Ok(mut ii) = self.ii.lock() {
-            ii.advance();
-        } else {
-            panic!("Poisoned buffer indices!");
-        }
+        let ii = self.ii.get();
+        unsafe { (*ii).advance() };
     }
     fn rr(&self) -> *const T {
-        if let Ok(mut ii) = self.ii.lock() {
-            self.tt[ii.snatched_read]
-        } else {
-            panic!("Poisoned buffer indices!");
-        }
+        let ii = self.ii.get();
+        self.tt[unsafe { (*ii).snatched_read }]
     }
     fn er(&self) -> *const T {
-        if let Ok(mut ii) = self.ii.lock() {
-            self.tt[ii.edit_read]
-        } else {
-            panic!("Poisoned buffer indices!");
-        }
+        let ii = self.ii.get();
+        self.tt[unsafe { (*ii).edit_read }]
     }
     fn ew(&self) -> *mut T {
-        if let Ok(mut ii) = self.ii.lock() {
-            self.tt[ii.edit_write]
-        } else {
-            panic!("Poisoned buffer indices!");
-        }
+        let ii = self.ii.get();
+        self.tt[unsafe { (*ii).edit_write }]
     }
 }
 impl<T: Clone + Debug> Drop for TripleBuffer<T> {
