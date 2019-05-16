@@ -5,6 +5,7 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+crossbeam = "0.7"
 log = "0.4.6"
 
 [dev-dependencies]

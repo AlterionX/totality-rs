@@ -4,6 +4,8 @@ use std::{
     cell::UnsafeCell,
 };
 
+use cb::utils::CachePadded;
+
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 
@@ -13,11 +15,10 @@ pub fn buffer<T: Clone + Debug>(src: T) -> (ReadingView<T>, EditingView<T>) {
 
 #[derive(Debug)]
 struct TripleBufferIndices {
-    snatched_read: usize, // unique
+    snatched_read: CachePadded<usize>, // unique
     packed_vals: AtomicUsize, // shared
     stale: AtomicBool, // shared
-    edit_write: usize, // unique
-    edit_read: usize, // unique
+    edit_rw: CachePadded<(usize, usize)>, // unique
 }
 impl TripleBufferIndices {
     #[inline]
@@ -36,7 +37,7 @@ impl TripleBufferIndices {
         (most_recent, next_write)
     }
     fn snatch(&mut self) {
-        let mask = (0b1 << 4) + (0b11 << 2) + match self.snatched_read {
+        let mask = (0b1 << 4) + (0b11 << 2) + match *self.snatched_read {
             0 => 0b00,
             1 => 0b01,
             2 => 0b10,
@@ -44,26 +45,25 @@ impl TripleBufferIndices {
         };
         let old_snatched = self.snatched_read;
         if !self.stale.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            self.snatched_read = Self::unpack(self.packed_vals.fetch_nand(mask, std::sync::atomic::Ordering::SeqCst)).0;
+            *self.snatched_read = Self::unpack(self.packed_vals.fetch_nand(mask, std::sync::atomic::Ordering::SeqCst)).0;
             trace!("Snatching indices {:?} and returning indices {:?}.", old_snatched, self.snatched_read);
         }
     }
     fn advance(&mut self) {
-        let next_write = Self::unpack(self.packed_vals.swap(Self::pack(self.edit_write, self.edit_write), std::sync::atomic::Ordering::SeqCst)).1;
+        let next_write = Self::unpack(self.packed_vals.swap(Self::pack(self.edit_rw.1, self.edit_rw.1), std::sync::atomic::Ordering::SeqCst)).1;
         self.stale.swap(false, std::sync::atomic::Ordering::SeqCst);
-        trace!("Advancing indices from {:?} to {:?}.", self.edit_write, next_write);
-        self.edit_read = self.edit_write;
-        self.edit_write = next_write;
+        trace!("Advancing indices from {:?} to {:?}.", self.edit_rw.1, next_write);
+        self.edit_rw.0 = self.edit_rw.1;
+        self.edit_rw.1 = next_write;
     }
 }
 impl Default for TripleBufferIndices {
     fn default() -> Self {
         Self {
-            snatched_read: 0,
+            snatched_read: CachePadded::new(0),
             packed_vals: AtomicUsize::new(Self::pack(0, 2)),
             stale: AtomicBool::new(true),
-            edit_read: 1,
-            edit_write: 2,
+            edit_rw: CachePadded::new((1, 2)),
         }
     }
 }
@@ -71,21 +71,21 @@ impl Default for TripleBufferIndices {
 #[derive(Debug)]
 struct TripleBuffer<T: Clone + Debug> {
     ii: UnsafeCell<TripleBufferIndices>,
-    backing_mem: *const [T; 3],
+    backing_mem: *const [CachePadded<T>; 3],
     tt: [*mut T; 3],
 }
 impl<T: Clone + Debug> TripleBuffer<T> {
     pub fn alloc(src: T) -> (ReadingView<T>, EditingView<T>) {
-        let backing_mem: *mut [T; 3] =
+        let backing_mem: *mut [CachePadded<T>; 3] =
             unsafe { Box::into_raw(Box::new(std::mem::uninitialized())) };
         let mut tt: [*mut T; 3] = unsafe { std::mem::uninitialized() };
         unsafe {
             for i in 0..2 {
-                std::ptr::write(&mut (*backing_mem)[i], src.clone());
+                std::ptr::write(&mut (*backing_mem)[i], CachePadded::new(src.clone()));
             }
-            std::ptr::write(&mut (*backing_mem)[2], src.clone());
+            std::ptr::write(&mut (*backing_mem)[2], CachePadded::new(src.clone()));
             for i in 0..3 {
-                tt[i] = &mut (*backing_mem)[i];
+                tt[i] = &mut *(*backing_mem)[i];
             }
         }
         let arc = Arc::new(Self {
@@ -105,21 +105,21 @@ impl<T: Clone + Debug> TripleBuffer<T> {
     }
     fn rr(&self) -> *const T {
         let ii = self.ii.get();
-        self.tt[unsafe { (*ii).snatched_read }]
+        self.tt[unsafe { *(*ii).snatched_read }]
     }
     fn er(&self) -> *const T {
         let ii = self.ii.get();
-        self.tt[unsafe { (*ii).edit_read }]
+        self.tt[unsafe { (*ii).edit_rw.0 }]
     }
     fn ew(&self) -> *mut T {
         let ii = self.ii.get();
-        self.tt[unsafe { (*ii).edit_write }]
+        self.tt[unsafe { (*ii).edit_rw.1 }]
     }
 }
 impl<T: Clone + Debug> Drop for TripleBuffer<T> {
     fn drop(&mut self) {
         unsafe {
-            Box::from_raw(self.backing_mem as *mut [T; 3]);
+            Box::from_raw(self.backing_mem as *mut [CachePadded<T>; 3]);
         };
     }
 }
