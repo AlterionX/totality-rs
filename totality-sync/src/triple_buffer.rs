@@ -1,48 +1,68 @@
 use std::{
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize},},
 };
 
-#[allow(dead_code)]
+#[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 
 pub fn buffer<T: Clone + Debug>(src: T) -> (ReadingView<T>, EditingView<T>) {
     TripleBuffer::alloc(src)
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 struct TripleBufferIndices {
-    snatched: usize,
-    most_recent: usize,
-    curr_write: usize,
-    next_write: usize,
+    snatched_read: usize, // unique
+    packed_vals: AtomicUsize, // shared
+    stale: AtomicBool, // shared
+    edit_write: usize, // unique
+    edit_read: usize, // unique
 }
 impl TripleBufferIndices {
-    fn snatch(&mut self) -> usize {
-        trace!("Snatching indices: {:?}.", self);
-        if self.snatched != self.most_recent {
-            self.next_write = self.snatched;
-            self.snatched = self.most_recent;
-        }
-        trace!("Reached indices: {:?}.", self);
-        return self.snatched;
+    #[inline]
+    fn pack(v0: usize, v1: usize) -> usize {
+        (0b0 << 4) + (v0 << 2) + ((!v1) & 0b11)
     }
-    fn advance(&mut self) -> (usize, usize) {
-        trace!("Advancing indices: {:?}.", self);
-        self.most_recent = self.curr_write;
-        self.curr_write = self.next_write;
-        self.next_write = self.most_recent;
-        trace!("Reached indices: {:?}.", self);
-        return (self.most_recent, self.curr_write);
+    #[inline]
+    fn unpack(packed: usize) -> (usize, usize) {
+        let should_negate = ((packed >> 4) & 0b1) != 0;
+        let most_recent = (if should_negate {
+            !packed
+        } else {
+            packed
+        } >> 2) & 0b11;
+        let next_write = !packed & 0b11;
+        (most_recent, next_write)
+    }
+    fn snatch(&mut self) {
+        let mask = (0b1 << 4) + (0b11 << 2) + match self.snatched_read {
+            0 => 0b00,
+            1 => 0b01,
+            2 => 0b10,
+            _ => panic!("We done goofed!"),
+        };
+        let old_snatched = self.snatched_read;
+        if !self.stale.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            self.snatched_read = Self::unpack(self.packed_vals.fetch_nand(mask, std::sync::atomic::Ordering::SeqCst)).0;
+            trace!("Snatching indices {:?} and returning indices {:?}.", old_snatched, self.snatched_read);
+        }
+    }
+    fn advance(&mut self) {
+        let next_write = Self::unpack(self.packed_vals.swap(Self::pack(self.edit_write, self.edit_write), std::sync::atomic::Ordering::SeqCst)).1;
+        self.stale.swap(false, std::sync::atomic::Ordering::SeqCst);
+        trace!("Advancing indices from {:?} to {:?}.", self.edit_write, next_write);
+        self.edit_read = self.edit_write;
+        self.edit_write = next_write;
     }
 }
 impl Default for TripleBufferIndices {
     fn default() -> Self {
         Self {
-            snatched: 0,
-            most_recent: 0,
-            curr_write: 1,
-            next_write: 2,
+            snatched_read: 0,
+            packed_vals: AtomicUsize::new(Self::pack(0, 2)),
+            stale: AtomicBool::new(true),
+            edit_read: 1,
+            edit_write: 2,
         }
     }
 }
@@ -74,19 +94,39 @@ impl<T: Clone + Debug> TripleBuffer<T> {
         });
         (ReadingView(arc.clone()), EditingView(arc))
     }
-    fn snatch(&self) -> *const T {
+    fn snatch(&self) {
         if let Ok(mut ii) = self.ii.lock() {
-            self.tt[ii.snatch()]
+            ii.snatch();
         } else {
-            panic!("Poisoned buffer indices!")
+            panic!("Poisoned buffer indices!");
         }
     }
-    fn advance(&self) -> (*const T, *mut T) {
+    fn advance(&self) {
         if let Ok(mut ii) = self.ii.lock() {
-            let (i_read, i_write) = ii.advance();
-            (self.tt[i_read], self.tt[i_write])
+            ii.advance();
         } else {
-            panic!("Poisoned buffer indices!")
+            panic!("Poisoned buffer indices!");
+        }
+    }
+    fn rr(&self) -> *const T {
+        if let Ok(mut ii) = self.ii.lock() {
+            self.tt[ii.snatched_read]
+        } else {
+            panic!("Poisoned buffer indices!");
+        }
+    }
+    fn er(&self) -> *const T {
+        if let Ok(mut ii) = self.ii.lock() {
+            self.tt[ii.edit_read]
+        } else {
+            panic!("Poisoned buffer indices!");
+        }
+    }
+    fn ew(&self) -> *mut T {
+        if let Ok(mut ii) = self.ii.lock() {
+            self.tt[ii.edit_write]
+        } else {
+            panic!("Poisoned buffer indices!");
         }
     }
 }
@@ -124,8 +164,9 @@ pub struct Reader<T: Clone + Debug> {
 }
 impl<T: Clone + Debug> Reader<T> {
     pub fn from_view(rv: ReadingView<T>) -> Reader<T> {
+        rv.0.snatch();
         Self {
-            locker: rv.0.snatch(),
+            locker: rv.0.rr(),
             origin: rv,
         }
     }
@@ -157,10 +198,9 @@ pub struct Editor<T: Clone + Debug> {
 }
 impl<T: Clone + Debug> Editor<T> {
     fn from_view(ev: EditingView<T>) -> Editor<T> {
-        let (r, w) = ev.0.advance();
         Editor {
+            rw_lock: RWPair { r: ev.0.er(), w: ev.0.ew() },
             origin: ev,
-            rw_lock: RWPair { r: r, w: w },
         }
     }
     pub fn r<'a>(&'a self) -> &'a T {
@@ -170,6 +210,7 @@ impl<T: Clone + Debug> Editor<T> {
         unsafe { &mut *self.rw_lock.w }
     }
     pub fn release(self) -> EditingView<T> {
+        self.origin.0.advance();
         self.origin
     }
 }
