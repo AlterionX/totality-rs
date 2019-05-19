@@ -18,8 +18,9 @@ use e::{a, b, p, C, V};
 use events::cb::ValueStore;
 use events::hal as e;
 use geom::{
-    scene::{Scene, TriGeom},
+    scene::{Scene},
     Model,
+    geom::{VMat, FMat, Geom, tri::{TriMeshGeom, TriGeom}},
 };
 use gui::{
     base_components::{DisplayTextBox, Pane},
@@ -99,15 +100,15 @@ struct State {
 impl State {
     fn new(cfg: Config) -> State {
         let sm = io::Manager::new();
-        let c_tri0 = Arc::new(Box::new(geom::scene::TriGeom::new(
+        let c_tri0 = Arc::new(Box::new(TriGeom::new(
             na::Matrix3::new(0.5, 0., -0.5, -0.5, 0., -0.5, 0.5, 0., 0.5).transpose(),
             na::Vector3::new(2, 1, 0),
             vec![[0f32, 0f32], [1f32, 0f32], [0f32, 1f32]],
             Some("totality/res/thomas-veyrat-anglerfish-view01-3-4.jpg".to_string()),
-        )) as Box<geom::Geom>);
+        )) as Box<Geom>);
         let c_box = Arc::new(Box::new({
-            geom::scene::TriMeshGeom::new(
-                geom::VMat::from_iterator(
+            TriMeshGeom::new(
+                VMat::from_iterator(
                     8,
                     vec![
                         -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5,
@@ -115,7 +116,7 @@ impl State {
                     ]
                     .into_iter(),
                 ),
-                geom::FMat::from_iterator(
+                FMat::from_iterator(
                     12,
                     vec![
                         1, 4, 0, 5, 4, 1, // bottom
@@ -139,7 +140,7 @@ impl State {
                 ],
                 Some("totality/res/53cb029b057a2dc4c753969a3ce83ff4.jpg".to_string()),
             )
-        }) as Box<geom::Geom>);
+        }) as Box<Geom>);
         info!("Constructed Triangle!");
         let mut box0_model = geom::Model::from_geom(c_box.clone());
         box0_model.set_omg(UnitQuaternion::from_axis_angle(

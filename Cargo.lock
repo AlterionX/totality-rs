@@ -1487,6 +1487,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "totality-shatter"
+version = "0.1.0"
+dependencies = [
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "totality-model 0.1.0",
+]
+
+[[package]]
 name = "totality-sim"
 version = "0.1.0"
 dependencies = [

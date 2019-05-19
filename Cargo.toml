@@ -6,6 +6,7 @@ members = [
     "totality-render",      # renderer, attach a separate backend later on for ray-traced version
     "totality-sim",         # physics sim, extensible with any update function
     "totality-io",          # io, since it's needed by gui + other things
+    "totality-shatter",     # for shattering meshes. It's entirely bound to totality-model, but such is life
     # Technically wholly independent, but designed to be used together
     "totality-events",      # Eventing system + hal for mouse, keyboard, etc
     "totality-sync",        # to place a few sync primitives beyond the standard library
@@ -18,5 +19,8 @@ members = [
 panic = "abort"
 
 [profile.bench]
+panic = "abort"
+
+[profile.release]
 panic = "abort"
 

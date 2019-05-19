@@ -1,0 +1,11 @@
+[package]
+name = "totality-shatter"
+version = "0.1.0"
+authors = ["AlterionX <ben.xu.cs@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+totality-model = { path = "../totality-model" }
+nalgebra = "0.18.0"
+log = "0.4.6"
+

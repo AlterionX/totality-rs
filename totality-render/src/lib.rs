@@ -110,7 +110,7 @@ pub struct Renderer<I: Instance> {
     instance_model_buffers: Vec<AllocatedBuffer<I::Backend>>,
     loaded_images: Vec<LoadedImage<I::Backend>>,
     alloc_buffers: Vec<AllocatedBuffer<I::Backend>>,
-    loaded_buffers: Vec<LoadedBuffer<Box<geom::Geom>, I::Backend>>,
+    loaded_buffers: Vec<LoadedBuffer<Box<geom::geom::Geom>, I::Backend>>,
 
     descriptor_sets: Vec<<I::Backend as Backend>::DescriptorSet>,
     descriptor_pool: ManuallyDrop<<I::Backend as Backend>::DescriptorPool>,
@@ -360,7 +360,7 @@ impl<B: Backend<Device = D>, D: Device<B>, I: Instance<Backend = B>> Renderer<I>
             &adapter,
             &device,
             None,
-            (8 * geom::Vertex::packed_byte_sz()) as u64,
+            (8 * geom::geom::Vertex::packed_byte_sz()) as u64,
             buffer::Usage::VERTEX,
         )?];
         let instance_model_buffers = (0..3)
@@ -591,7 +591,7 @@ impl<B: Backend<Device = D>, D: Device<B>, I: Instance<Backend = B>> Renderer<I>
         )
     }
     fn vertex_attribs() -> Result<Vec<AttributeDesc>, &'static str> {
-        let aa = geom::Vertex::attributes();
+        let aa = geom::geom::Vertex::attributes();
         let mut curr_loc = 0;
         let mut descs = Vec::new();
         for a in aa.iter() {
@@ -660,7 +660,7 @@ impl<B: Backend<Device = D>, D: Device<B>, I: Instance<Backend = B>> Renderer<I>
         let vertex_buffers: Vec<VertexBufferDesc> = vec![
             VertexBufferDesc {
                 binding: 0,
-                stride: geom::Vertex::packed_byte_sz() as ElemStride,
+                stride: geom::geom::Vertex::packed_byte_sz() as ElemStride,
                 rate: VertexInputRate::Vertex,
             },
             VertexBufferDesc {
@@ -672,7 +672,7 @@ impl<B: Backend<Device = D>, D: Device<B>, I: Instance<Backend = B>> Renderer<I>
         let vertex_buffers_no_depth: Vec<VertexBufferDesc> = vec![
             VertexBufferDesc {
                 binding: 0,
-                stride: geom::Vertex::packed_byte_sz() as ElemStride,
+                stride: geom::geom::Vertex::packed_byte_sz() as ElemStride,
                 rate: VertexInputRate::Vertex,
             },
             VertexBufferDesc {
