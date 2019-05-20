@@ -5,11 +5,11 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-crossbeam = "0.7"
+crossbeam = "0.7.1"
 log = "0.4.6"
 
 [dev-dependencies]
-criterion = "0.2"
+criterion = "0.2.11"
 
 [[bench]]
 name = "my_bench"

@@ -1,4 +1,5 @@
 extern crate nalgebra as na;
+extern crate boomphf as phf;
 extern crate totality_model as model;
 
 mod adv;
