@@ -109,7 +109,7 @@ impl<I: Into<SortedTriEle>> IndexMut<I> for SortedTri {
 struct STAIBBin {
     tier: SortedTriEle,
     id_range: Range<usize>,
-    val: u64,
+    key: STId,
 }
 impl STAIBBin {
     fn len(&self) -> usize {
@@ -118,10 +118,10 @@ impl STAIBBin {
 }
 enum STAIBBucket<V> {
     Leaf(V),
-    Hashed(Mphf<usize>, Vec<STAIBBucket<V>>),
+    Hashed(Mphf<STId>, Vec<STAIBBucket<V>>),
 }
 impl<V> STAIBBucket<V> {
-    fn lookup<W>(&self, k: usize) -> &STAIBBucket<V> {
+    fn lookup<W>(&self, k: STId) -> &STAIBBucket<V> {
         match self {
             STAIBBucket::Leaf(v) => self,
             STAIBBucket::Hashed(phf, buckets) => &buckets[phf.hash(&k) as usize],
@@ -139,11 +139,11 @@ impl SortedTriAndIntegerBimap {
         let mut range_start = Vec::with_capacity(scan.len());
         let mut range_end = Vec::with_capacity(scan.len());
         let mut seen = 0;
-        let mut last = 0;
+        let mut last;
         for (i, st) in scan.iter().enumerate() {
-            if i == 0 || last != st.0[i].into() {
+            if i == 0 || last != st.0[i] {
                 seen += 1;
-                last = st.0[i].into();
+                last = st.0[i];
                 uniques.push(last);
                 range_start.push(i);
                 if i != 1 {
@@ -154,7 +154,7 @@ impl SortedTriAndIntegerBimap {
         if scan.len() != 0 {
             range_end.push(scan.len());
         }
-        (0..uniques.len()).map(|i| STAIBBin { tier: tier, id_range: range_start[i]..range_end[i], val: uniques[i] }).collect()
+        (0..uniques.len()).map(|i| STAIBBin { tier: tier, id_range: range_start[i]..range_end[i], key: uniques[i] }).collect()
     }
     pub fn new(sts: &[SortedTri]) -> Self {
         const gamma: f64 = 1.0; // TODO tweak based on data set
@@ -164,40 +164,50 @@ impl SortedTriAndIntegerBimap {
         sorted_sts.sort_unstable_by(|a, b| a.cmp(b));
         let t0_buckets = Self::find_bins(0, sorted_sts.as_slice());
         // find minimal, costs O(n), oddly enough
-        for t0_bucket in t0_buckets.iter() {
+        let keys = t1_buckets.iter().map(|bin| bin.key).collect();
+        t0_buckets.iter().map(|t0_bucket| if t0_bucket.len() == 1 {
+            STAIBBucket::Leaf(sorted_sts[t0_bucket.id_range.start].1)
+        } else {
             let t1_buckets = Self::find_bins(1, &sorted_sts[t0_bucket.id_range]);
-            if t0_bucket.len() == 1 {
+            let keys = t1_buckets.iter().map(|bin| bin.key).collect();
+            let t1_staibb = t1_buckets.iter().map(|t1_bucket| if t1_bucket.len() == 1 {
+                STAIBBucket::Leaf(sorted_sts[t1_bucket.id_range.start].1)
             } else {
-                for t1_bucket in t1_buckets.iter() {
-                    if t1_bucket.len() == 1 {
-                    } else {
-                        let t2_buckets = Self::find_bins(2, &sorted_sts[t1_bucket.id_range]);
-                        for t2_bucket in t2_buckets.iter() {
-                            if t2_bucket.len() == 1 {
-                                STAIBBucket::Leaf(t2_bucket.val);
-                            } else {
-                                let tup_ids = sorted_sts[t2_bucket.id_range].iter().map(|(a, _)| a[2]).collect();
-                                let phf = Mphf::new(gamma, &tup_ids, None);
-                            }
-                            Mphf::new();
-                        }
-                    }
-                }
-                Mphf::new();
-            }
+                let t2_buckets = Self::find_bins(2, &sorted_sts[t1_bucket.id_range]);
+                let keys = t2_buckets.iter().map(|bin| bin.key).collect();
+                let t2_staibb = t2_buckets.iter().map(|t2_bucket| if t2_bucket.len() == 1 {
+                    STAIBBucket::Leaf(sorted_sts[t2_bucket.id_range.start].1)
+                } else {
+                    let tup_ids = sorted_sts[t2_bucket.id_range].iter().map(|(a, _)| a[2]).collect();
+                    let phf = Mphf::new(gamma, &tup_ids, None);
+                    STAIBBucket::Hashed(
+                        phf,
+                        sorted_sts[t2_bucket.id_range].iter()
+                            .map(|(_, v)| STAIBBucket::Leaf(*v))
+                            .collect(),
+                    )
+                }).collect();
+                let phf = Mphf::new(gamma, &keys, None);
+                STAIBBucket::Hashed(phf, t2_staibb)
+            }).collect();
+            let phf = Mphf::new(gamma, &keys, None);
+            STAIBBucket::Hashed(phf, t1_staibb)
+        }).collect();
+        let phf = Mphf::new(gamma, &keys, None);
+        Self {
+            root_st: STAIBBucket::Hashed(phf, t1_staibb)
         }
-        Self { }
     }
     pub fn lookup_st(&self, st: &SortedTri) -> OId {
         let target = &self.root_st;
         for i in 0..3 {
             let k = st[i];
-            let bucket = target.lookup(k.into());
+            let bucket = target.lookup(k);
             if let STAIBBucket::Leaf(v) = target {
                 return *v;
             }
             target = bucket;
         }
-        panic!("You can't get here! Or you're not supposed to anyways... (Input: {:?})", st);
+        panic!("You can't get here! Or you're not supposed to anyways... (Lookup Input: {:?})", st);
     }
 }
