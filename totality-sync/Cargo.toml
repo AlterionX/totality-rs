@@ -4,6 +4,13 @@ version = "0.1.0"
 authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2018"
 
+[features]
+default = []
+old = []
+sub = []
+fna = []
+dummy = []
+
 [dependencies]
 crossbeam = "0.7.1"
 log = "0.4.6"
