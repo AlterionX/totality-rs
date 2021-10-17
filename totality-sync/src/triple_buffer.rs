@@ -79,33 +79,50 @@ mod tb {
     }
 }
 
-#[cfg(feature = "fna")]
+#[cfg(any(feature = "fna_usize", feature = "fna"))]
 mod tb {
+    #[cfg(feature = "fna")]
     use std::sync::atomic::{AtomicU8, Ordering};
+    #[cfg(feature = "fna_usize")]
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
 
+    #[cfg(feature = "fna")]
+    type SyncType = AtomicU8;
+    #[cfg(feature = "fna_usize")]
+    type SyncType = AtomicUsize;
+    #[cfg(feature = "fna")]
+    type MaskType = u8;
+    #[cfg(feature = "fna_usize")]
+    type MaskType = usize;
+    #[cfg(feature = "fna")]
+    type Index = u8;
+    #[cfg(feature = "fna_usize")]
+    type Index = usize;
+
     #[derive(Debug)]
     pub struct TripleBufferIndices {
-        pub snatched_read: CachePadded<u8>,     // unique
-        packed: CachePadded<AtomicU8>, // shared
-        pub edit_rw: CachePadded<(u8, u8)>,  // unique
+        pub snatched_read: CachePadded<Index>,     // unique
+        packed: CachePadded<SyncType>, // shared
+        pub edit_rw: CachePadded<(Index, Index)>,  // unique
     }
     impl TripleBufferIndices {
-        const BUFFER_ID_MASK: u8 = 0b11;
-        const IS_NEW_MASK: u8 = 0b100;
+        const BUFFER_ID_MASK: MaskType = 0b11;
+        const IS_NEW_MASK: MaskType = 0b100;
         #[inline]
-        fn pack(v: u8) -> u8 {
+        fn pack(v: MaskType) -> MaskType {
             !v & Self::BUFFER_ID_MASK
         }
         #[inline]
-        fn unpack(packed: u8) -> (bool, u8) {
+        fn unpack(packed: MaskType) -> (bool, Index) {
             let is_new = (packed & Self::IS_NEW_MASK) == 0;
             let next_write = !packed & Self::BUFFER_ID_MASK;
             (is_new, next_write)
         }
-        fn mask(v: u8) -> u8 {
+        #[inline]
+        fn mask(v: MaskType) -> MaskType {
             match v {
                 0 => 0b000,
                 1 => 0b001,
@@ -113,9 +130,11 @@ mod tb {
                 _ => panic!("We done goofed!"),
             }
         }
+    }
+    impl TripleBufferIndices {
         pub fn snatch(&mut self) {
-            let old_snatched = self.snatched_read;
             if Self::unpack(self.packed.load(Ordering::Acquire)).0 {
+                let old_snatched = self.snatched_read;
                 *self.snatched_read = Self::unpack(
                     self.packed.fetch_nand(Self::mask(*old_snatched), Ordering::AcqRel),
                 )
@@ -139,90 +158,14 @@ mod tb {
                 curr_read,
                 curr_write
             );
-            self.edit_rw.0 = curr_read;
-            self.edit_rw.1 = curr_write;
+            *self.edit_rw = (curr_read, curr_write);
         }
     }
     impl Default for TripleBufferIndices {
         fn default() -> Self {
             Self {
                 snatched_read: CachePadded::new(0),
-                packed: CachePadded::new(AtomicU8::new(Self::pack(1))),
-                edit_rw: CachePadded::new((1, 2)),
-            }
-        }
-    }
-}
-
-#[cfg(feature = "fna_usize")]
-mod tb {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    use cb::utils::CachePadded;
-    #[allow(unused_imports)]
-    use log::{debug, error, info, trace, warn};
-
-    #[derive(Debug)]
-    pub struct TripleBufferIndices {
-        pub snatched_read: CachePadded<usize>,     // unique
-        packed: CachePadded<AtomicUsize>, // shared
-        pub edit_rw: CachePadded<(usize, usize)>,  // unique
-    }
-    impl TripleBufferIndices {
-        const BUFFER_ID_MASK: usize = 0b11;
-        const IS_NEW_MASK: usize = 0b100;
-        #[inline]
-        fn pack(v: usize) -> usize {
-            !v & Self::BUFFER_ID_MASK
-        }
-        #[inline]
-        fn unpack(packed: usize) -> (bool, usize) {
-            let is_new = (packed & Self::IS_NEW_MASK) == 0;
-            let next_write = !packed & Self::BUFFER_ID_MASK;
-            (is_new, next_write)
-        }
-        fn mask(v: usize) -> usize {
-            match v {
-                0 => 0b000,
-                1 => 0b001,
-                2 => 0b010,
-                _ => panic!("We done goofed!"),
-            }
-        }
-        pub fn snatch(&mut self) {
-            let old_snatched = self.snatched_read;
-            if Self::unpack(self.packed.load(Ordering::Acquire)).0 {
-                *self.snatched_read = Self::unpack(
-                    self.packed.fetch_nand(Self::mask(*old_snatched), Ordering::AcqRel),
-                )
-                .1;
-                trace!(
-                    "Snatching indices {:?} and returning indices {:?}.",
-                    old_snatched,
-                    self.snatched_read
-                );
-            }
-        }
-        pub fn advance(&mut self) {
-            let curr_read = self.edit_rw.1;
-            let curr_write = Self::unpack(self.packed.swap(
-                Self::pack(curr_read),
-                Ordering::Release,
-            ))
-            .1;
-            trace!(
-                "Advancing indices from {:?} to {:?}.",
-                curr_read,
-                curr_write
-            );
-            self.edit_rw.0 = curr_read;
-            self.edit_rw.1 = curr_write;
-        }
-    }
-    impl Default for TripleBufferIndices {
-        fn default() -> Self {
-            Self {
-                snatched_read: CachePadded::new(0),
-                packed: CachePadded::new(AtomicUsize::new(Self::pack(1))),
+                packed: CachePadded::new(SyncType::new(Self::pack(1))),
                 edit_rw: CachePadded::new((1, 2)),
             }
         }
@@ -231,7 +174,7 @@ mod tb {
 
 #[cfg(feature = "old")]
 mod tb {
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicU8, AtomicUsize, AtomicBool, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
@@ -264,8 +207,8 @@ mod tb {
                     2 => 0b10,
                     _ => panic!("We done goofed!"),
                 };
-            let old_snatched = self.snatched_read;
             if !self.stale.swap(true, std::sync::atomic::Ordering::Acquire) {
+                let old_snatched = *self.snatched_read;
                 *self.snatched_read = Self::unpack(
                     self.packed_vals
                         .fetch_nand(mask, std::sync::atomic::Ordering::AcqRel),
@@ -290,8 +233,7 @@ mod tb {
                 self.edit_rw.1,
                 next_write
             );
-            self.edit_rw.0 = self.edit_rw.1;
-            self.edit_rw.1 = next_write;
+            self.edit_rw = (self.edit_rw.1, next_write);
         }
     }
     impl Default for TripleBufferIndices {
@@ -307,7 +249,7 @@ mod tb {
 }
 
 // NOTE Dummy doesn't actually work, don't use it outside of benchmarking
-#[cfg(all(feature = "dummy", not(test)))]
+#[cfg(all(feature = "dummy", test))]
 mod tb {
     use std::{
         sync::{
@@ -353,6 +295,7 @@ pub struct TripleBuffer<T: Clone> {
     tt: [*mut T; 3],
 }
 impl<T: Clone> TripleBuffer<T> {
+    #[inline]
     fn alloc(src: T) -> TB<T> {
         TB(Self::raw(src))
     }
@@ -375,32 +318,40 @@ impl<T: Clone> TripleBuffer<T> {
             tt: unsafe { tt.assume_init() },
         })
     }
+    #[inline]
     pub fn snatch(&self) {
         let ii = self.ii.get();
         unsafe { (*ii).snatch() };
     }
+    #[inline]
     pub fn advance(&self) {
         let ii = self.ii.get();
         unsafe { (*ii).advance() };
     }
+    #[inline]
     fn rr(&self) -> *const T {
         let ii = self.ii.get();
         self.tt[unsafe { *(*ii).snatched_read as usize }]
     }
+    #[inline]
     fn er(&self) -> *const T {
         let ii = self.ii.get();
         self.tt[unsafe { (*ii).edit_rw.0 as usize }]
     }
+    #[inline]
     fn ew(&self) -> *mut T {
         let ii = self.ii.get();
         self.tt[unsafe { (*ii).edit_rw.1 as usize }]
     }
+    #[inline]
     pub fn reader_r(&self) -> & T {
         unsafe { & *self.rr() }
     }
+    #[inline]
     pub fn editor_r(&self) -> & T {
         unsafe { & *self.er() }
     }
+    #[inline]
     pub fn editor_w(&self) -> &mut T {
         unsafe { &mut *self.ew() }
     }

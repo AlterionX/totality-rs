@@ -5,21 +5,22 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2021"
 
 [features]
-default = ["fna"]
+default = ["fna_usize"]
 old = []
 sub = []
 fna = []
+fna_usize = []
 dummy = []
 
 [dependencies]
 crossbeam = "0.8.1"
-log = "0.4.14"
+log = { version = "0.4.14", features = ["release_max_level_off"] }
 
 [dev-dependencies]
 criterion = "0.3.5"
 testbench = "0.8"
 
 [[bench]]
-name = "my_bench"
+name = "triple_buffer_lib"
 harness = false
 

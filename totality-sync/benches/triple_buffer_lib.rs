@@ -58,7 +58,10 @@ pub fn benchmark(c: &mut Criterion) {
     {
         let mut read_contended = c.benchmark_group("read contention");
         testbench::run_under_contention(
-            || black_box(*rbuf.reader_r()),
+            || {
+                rbuf.snatch();
+                black_box(*rbuf.reader_r());
+            },
             || {
                 read_contended.bench_function("write input", |b| {
                     b.iter(|| {
