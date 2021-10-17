@@ -1,8 +1,8 @@
 use crate::component::{
-    Background, ChildrenInfo, Component, Id, ShouldHaltPropagation, SizingInfo,
+    Background, ChildrenInfo, Component, Id, SizingInfo,
 };
 use crate::{color, draw, event as e, layout};
-use layout::{LiteralPlacer, Placer, Sz};
+use layout::{Placer, Sz};
 
 use std::sync::Mutex;
 
@@ -12,7 +12,7 @@ pub struct DisplayTextBox {
     text: String,
     inf: SizingInfo,
     sz: UnsafeCell<Sz>,
-    placer: Box<Placer>,
+    placer: Box<dyn Placer>,
     cbs: Vec<e::CBFn>,
     emp_vec: Vec<Id>,
     parent: Id,
@@ -46,7 +46,7 @@ impl Component for DisplayTextBox {
         Some(Background::Color(color::TRANSPARENT.clone()))
     }
     // Changes dynamically
-    fn set_placer(&self, p: &Box<Placer>) {}
+    fn set_placer(&self, p: &Box<dyn Placer>) {}
     fn resize(&self, sz: Sz) {
         unsafe {
             *self.sz.get() = sz;

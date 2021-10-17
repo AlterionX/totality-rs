@@ -1,8 +1,8 @@
-use crate::component::{Component, RootComponent};
+use crate::component::Component;
 use crate::layout::Placer;
 
 pub struct Pane<P: Placer> {
-    children: Vec<Box<Component>>,
+    children: Vec<Box<dyn Component>>,
     manager: P,
 }
 // impl <P: Placer> Component for Pane<P> {

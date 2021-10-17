@@ -32,9 +32,9 @@ pub enum Background {
     Stacked(Vec<Background>, StackOrder),
 }
 
-pub struct Id(u64, Rc<Component>);
+pub struct Id(u64, Rc<dyn Component>);
 impl Id {
-    pub fn get(&self) -> &Component {
+    pub fn get(&self) -> &dyn Component {
         &*self.1
     }
     pub fn get_id(&self) -> u64 {
@@ -43,7 +43,7 @@ impl Id {
 }
 
 pub struct ChildrenInfo {
-    pub placer: Box<Placer>,
+    pub placer: Box<dyn Placer>,
     pub children: Vec<Id>,
 }
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
@@ -65,7 +65,7 @@ pub trait Component {
         self.sz_info().and_then(|si| si.preferred.as_ref())
     }
     fn children_info(&self) -> Option<&ChildrenInfo>;
-    fn placer(&self) -> Option<&Box<Placer>> {
+    fn placer(&self) -> Option<&Box<dyn Placer>> {
         self.children_info().map(|ci| &ci.placer)
     }
     fn children(&self) -> Option<&Vec<Id>> {
@@ -77,7 +77,7 @@ pub trait Component {
         Some(Background::Color(*color::TRANSPARENT))
     }
     // Changes dynamically
-    fn set_placer(&self, p: &Box<Placer>);
+    fn set_placer(&self, p: &Box<dyn Placer>);
     fn resize(&self, sz: Sz);
     fn fire_event(&mut self, e: &e::E) -> ShouldHaltPropagation {
         false.into()
@@ -96,7 +96,7 @@ enum IterMode {
     POST,
     PRE,
 }
-fn iter(root: &Id, mode: IterMode, f: &Fn(&Component)) {
+fn iter(root: &Id, mode: IterMode, f: &dyn Fn(&dyn Component)) {
     if mode == IterMode::PRE {
         f(root.get());
     }
@@ -109,13 +109,13 @@ fn iter(root: &Id, mode: IterMode, f: &Fn(&Component)) {
         f(root.get());
     }
 }
-pub fn post_iter(root: &Id, f: &Fn(&Component)) {
+pub fn post_iter(root: &Id, f: &dyn Fn(&dyn Component)) {
     iter(root, IterMode::POST, f);
 }
-pub fn pre_iter(root: &Id, f: &Fn(&Component)) {
+pub fn pre_iter(root: &Id, f: &dyn Fn(&dyn Component)) {
     iter(root, IterMode::PRE, f);
 }
 
 pub trait RootComponent: Component {
-    fn root_placer() -> Box<Placer>;
+    fn root_placer() -> Box<dyn Placer>;
 }

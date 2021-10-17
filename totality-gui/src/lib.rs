@@ -1,8 +1,4 @@
 #![recursion_limit = "512"]
-#[macro_use]
-extern crate lazy_static;
-extern crate log;
-extern crate totality_model as geom;
 
 // exports
 pub mod color;
@@ -19,17 +15,16 @@ use draw::Drawer;
 use layout::{Pos, Sz};
 use linkage::*;
 
-#[allow(dead_code)]
-use log::{debug, error, info, trace, warn};
+use log::info;
 
 pub struct Core<EL: EventLinkage, DL: DrawLinkage> {
     drawing_area: Sz,
     world_placement: geom::Model,
     cam: geom::camera::Camera,
     root: Id,
-    drawer: Box<Drawer>,
+    drawer: Box<dyn Drawer>,
     // indexed boxes for components
-    pool: Vec<Rc<Component>>,
+    pool: Vec<Rc<dyn Component>>,
     pub elink: EL,
     pub dlink: DL,
 }

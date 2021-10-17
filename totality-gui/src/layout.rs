@@ -1,4 +1,4 @@
-use crate::component::{Component, Id, RootComponent};
+use crate::component::Component;
 use std::{
     cmp::{max, min},
     rc::Rc,
@@ -94,7 +94,7 @@ impl From<(Pos, Sz, Rot)> for Cfg {
 }
 
 pub trait Placer {
-    fn place(&self, comp: &Vec<Rc<Box<Component>>>, sz: Sz) -> Vec<Cfg>;
+    fn place(&self, comp: &Vec<Rc<Box<dyn Component>>>, sz: Sz) -> Vec<Cfg>;
 }
 
 pub struct LiteralPlacer {
@@ -109,7 +109,7 @@ impl LiteralPlacer {
     }
 }
 impl Placer for LiteralPlacer {
-    fn place(&self, comp: &Vec<Rc<Box<Component>>>, sz: Sz) -> Vec<Cfg> {
+    fn place(&self, comp: &Vec<Rc<Box<dyn Component>>>, sz: Sz) -> Vec<Cfg> {
         self.cfgs.clone()
     }
 }

@@ -1,5 +1,3 @@
-extern crate totality_events as ext_events;
-
 use ext_events::cb;
 use ext_events::hal as e;
 

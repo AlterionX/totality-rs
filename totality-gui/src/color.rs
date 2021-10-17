@@ -1,8 +1,5 @@
 use lazy_static;
-use std::{
-    cmp::{max, min},
-    rc::Rc,
-};
+use std::cmp::min;
 
 fn map<T, U, F: Fn(&T) -> U>(tt: &[T; 4], f: F) -> [U; 4] {
     [f(&tt[0]), f(&tt[1]), f(&tt[2]), f(&tt[3])]
@@ -25,22 +22,22 @@ fn pairmap<T, U, F: Fn(&T, &T) -> U>(tt: &[T; 8], f: F) -> [U; 4] {
 }
 fn hex_char(c: char) -> Result<u8, &'static str> {
     match c {
-        '0'...'9' | 'a'...'f' | 'A'...'F' => Ok(c as u8),
+        '0'..='9' | 'a'..='f' | 'A'..='F' => Ok(c as u8),
         _ => Err("Non-hex char passed off as hex char (0-9,a-z,A-Z)."),
     }
 }
 fn hex_val(b: &u8) -> Result<u8, &'static str> {
     match b {
-        b'0'...b'9' => Ok(b - b'0'),
-        b'a'...b'f' => Ok(b - b'a' + 10),
-        b'A'...b'F' => Ok(b - b'A' + 10),
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
         _ => Err("Non-hex byte passed off as hex byte."),
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Color([u8; 4]);
 
-lazy_static! {
+lazy_static::lazy_static! {
     // reds
     pub static ref INDIAN_RED: Color = Color::hex_bb(b"#cd5c5c").expect("INDIAN_RED color parse error.");
     pub static ref LIGHT_CORAL: Color = Color::hex_bb(b"#f08080").expect("LIGHT_CORAL color parse error.");
