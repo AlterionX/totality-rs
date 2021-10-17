@@ -1,11 +1,8 @@
-    use std::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicU8, Ordering},
-            Arc,
-        },
-        marker::Send,
-    };
+use std::{
+    cell::UnsafeCell,
+    sync::Arc,
+    marker::Send,
+};
 
 use cb::utils::CachePadded;
 #[allow(unused_imports)]
@@ -13,14 +10,7 @@ use log::{debug, error, info, trace, warn};
 
 #[cfg(feature = "sub")]
 mod tb {
-    use std::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicU8, Ordering},
-            Arc,
-        },
-        marker::Send,
-    };
+    use std::sync::atomic::{AtomicU8, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
@@ -89,16 +79,9 @@ mod tb {
     }
 }
 
-#[cfg(any(feature = "fna", not(any(feature = "dummy", feature = "sub", feature = "old", feature = "fna_usize"))))]
+#[cfg(feature = "fna")]
 mod tb {
-    use std::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicU8, Ordering},
-            Arc,
-        },
-        marker::Send,
-    };
+    use std::sync::atomic::{AtomicU8, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
@@ -173,14 +156,7 @@ mod tb {
 
 #[cfg(feature = "fna_usize")]
 mod tb {
-    use std::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-        marker::Send,
-    };
+    use std::sync::atomic::{AtomicU8, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
@@ -255,14 +231,7 @@ mod tb {
 
 #[cfg(feature = "old")]
 mod tb {
-    use std::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, AtomicBool, Ordering},
-            Arc,
-        },
-        marker::Send,
-    };
+    use std::sync::atomic::{AtomicU8, Ordering};
     use cb::utils::CachePadded;
     #[allow(unused_imports)]
     use log::{debug, error, info, trace, warn};
@@ -338,7 +307,7 @@ mod tb {
 }
 
 // NOTE Dummy doesn't actually work, don't use it outside of benchmarking
-#[cfg(feature = "dummy")]
+#[cfg(all(feature = "dummy", not(test)))]
 mod tb {
     use std::{
         sync::{
@@ -388,21 +357,22 @@ impl<T: Clone> TripleBuffer<T> {
         TB(Self::raw(src))
     }
     pub fn raw(src: T) -> Arc<TripleBuffer<T>> {
+        use std::mem::MaybeUninit;
         let backing_mem = Box::into_raw(Box::new([
             UnsafeCell::new(CachePadded::new(src.clone())),
             UnsafeCell::new(CachePadded::new(src.clone())),
             UnsafeCell::new(CachePadded::new(src)),
         ]));
-        let mut tt: [*mut T; 3] = unsafe { std::mem::uninitialized() };
+        let mut tt: MaybeUninit<[*mut T; 3]> = MaybeUninit::uninit();
         unsafe {
             for i in 0..3 {
-                tt[i] = &mut **(*backing_mem)[i].get();
+                (*tt.as_mut_ptr())[i] = &mut **(*backing_mem)[i].get();
             }
         }
         Arc::new(Self {
             ii: UnsafeCell::new(TripleBufferIndices::default()),
             backing_mem,
-            tt,
+            tt: unsafe { tt.assume_init() },
         })
     }
     pub fn snatch(&self) {
@@ -426,16 +396,13 @@ impl<T: Clone> TripleBuffer<T> {
         self.tt[unsafe { (*ii).edit_rw.1 as usize }]
     }
     pub fn reader_r(&self) -> & T {
-        let ii = self.ii.get();
-        unsafe { & *self.tt[*(*ii).snatched_read as usize] }
+        unsafe { & *self.rr() }
     }
     pub fn editor_r(&self) -> & T {
-        let ii = self.ii.get();
-        unsafe { & *self.tt[(*(*ii).edit_rw).0 as usize] }
+        unsafe { & *self.er() }
     }
     pub fn editor_w(&self) -> &mut T {
-        let ii = self.ii.get();
-        unsafe { &mut *self.tt[(*(*ii).edit_rw).1 as usize] }
+        unsafe { &mut *self.ew() }
     }
 }
 impl<T: Clone> Drop for TripleBuffer<T> {

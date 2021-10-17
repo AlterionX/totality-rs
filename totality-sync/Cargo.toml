@@ -5,18 +5,19 @@ authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2021"
 
 [features]
-default = []
+default = ["fna"]
 old = []
 sub = []
 fna = []
 dummy = []
 
 [dependencies]
-crossbeam = "0.7.1"
-log = "0.4.6"
+crossbeam = "0.8.1"
+log = "0.4.14"
 
 [dev-dependencies]
-criterion = "0.2.11"
+criterion = "0.3.5"
+testbench = "0.8"
 
 [[bench]]
 name = "my_bench"
