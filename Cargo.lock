@@ -982,12 +982,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mint"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793e84ff3f9a63214a5475097fac2a3e3674f862efcaeabebf5f4da36d7512ec"
-
-[[package]]
 name = "naga"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1026,7 +1020,6 @@ checksum = "d506eb7e08d6329505faa8a3a00a5dcc6de9f76e0c77e4b75763ae3c770831ff"
 dependencies = [
  "approx 0.5.0",
  "matrixmultiply 0.3.1",
- "mint",
  "nalgebra-macros",
  "num-complex 0.4.0",
  "num-rational 0.4.0",
@@ -2043,7 +2036,7 @@ name = "totality-events"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra 0.18.0",
+ "nalgebra 0.29.0",
 ]
 
 [[package]]

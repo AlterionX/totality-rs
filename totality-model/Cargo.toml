@@ -9,4 +9,3 @@ log = "0.4.6"
 [dependencies.na]
 package = "nalgebra"
 version = "0.29.0"
-features = ["mint"]
