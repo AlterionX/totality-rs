@@ -5,7 +5,6 @@
 //! Provides a variety of macros that help out with the thread creation. Also provides
 //! trace-level logging statements.
 
-extern crate proc_macro;
 pub mod killable_thread;
 
 /// A macro to create a simple KillableThread.
