@@ -1,14 +1,11 @@
-use std::{
-    cell::RefCell,
-    sync::mpsc::{channel, Receiver},
-};
+use std::cell::RefCell;
 
 use super::WindowSpecs;
 use internal_events::hal as e;
 
-use log::{debug, trace};
+use log::trace;
 use winit::{
-    dpi::*, ControlFlow, DeviceEvent, Event, EventsLoop, KeyboardInput, ScanCode, VirtualKeyCode,
+    dpi::*, DeviceEvent, Event, EventsLoop, KeyboardInput, VirtualKeyCode,
     WindowBuilder, WindowEvent,
 };
 
@@ -74,7 +71,7 @@ impl super::IO for IO {
                 ..
             } => e::p::V::CursorPos(e::p::PosState(as_vec(p))).into(),
             Event::WindowEvent {
-                event: WindowEvent::Focused(f),
+                event: WindowEvent::Focused(_),
                 ..
             } => e::b::V(e::b::Flag::Focus.into(), e::b::State::DOWN).into(),
             Event::DeviceEvent {
@@ -91,7 +88,7 @@ impl super::IO for IO {
                 ..
             } => e::V::Ignored,
             Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion { delta: (x, y) },
+                event: DeviceEvent::MouseMotion { delta: _ },
                 ..
             } => e::V::Ignored,
             Event::WindowEvent {
@@ -126,9 +123,6 @@ fn parse_keyboard(k: KeyboardInput) -> e::V {
     }
 }
 
-fn map_sc(sc: ScanCode) -> e::b::C {
-    unimplemented!("Cannot parse scancode {:?} yet.", sc)
-}
 fn map_vk(vk: VirtualKeyCode) -> e::b::C {
     match vk {
         VirtualKeyCode::Key1 => '1'.into(),

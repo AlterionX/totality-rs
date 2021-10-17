@@ -1,9 +1,3 @@
-extern crate log;
-extern crate nalgebra as na;
-extern crate totality_events as internal_events;
-extern crate totality_threading as th;
-extern crate winit;
-
 // exports
 mod source;
 
@@ -28,33 +22,11 @@ use th::killable_thread::KillableThread;
 use e::*;
 use winit::Window;
 
-#[allow(dead_code)]
-use log::{debug, error, info, trace, warn};
+use log::{error, info, trace, warn};
 
 struct Twinned<T> {
     imm: T,
     per: T,
-}
-impl<T> Twinned<T> {
-    fn consume<F>(self, f: F)
-    where
-        F: Fn(T),
-    {
-        f(self.imm);
-        f(self.per);
-    }
-    fn map<F, U>(self, f: F) -> Twinned<U>
-    where
-        F: Fn(T) -> U,
-    {
-        Twinned {
-            imm: f(self.imm),
-            per: f(self.per),
-        }
-    }
-    fn as_tup(self) -> (T, T) {
-        (self.imm, self.per)
-    }
 }
 
 pub enum RegErr<T> {
@@ -62,7 +34,6 @@ pub enum RegErr<T> {
     Recv(RecvError),
 }
 
-pub type CBFn = cb::CBFn<State, V, C>;
 pub type CB = cb::CB<State, V, C>;
 
 pub struct Manager {

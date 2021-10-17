@@ -4,12 +4,18 @@ version = "0.1.0"
 authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
 edition = "2021"
 
-[dependencies]
 # Own, base independents
-totality-threading = { path = "../totality-threading" }
-totality-events = { path = "../totality-events" }
+[dependencies.internal-events]
+package = "totality-events"
+path = "../totality-events"
+[dependencies.th]
+package = "totality-threading"
+path = "../totality-threading"
 # imports
+[dependencies]
 winit = "0.19.1"
-nalgebra = "0.18.0"
 log = "0.4.6"
+[dependencies.na]
+package = "nalgebra"
+version = "0.29.0"
 
