@@ -4,9 +4,7 @@ pub mod scene;
 
 use geom::Geom;
 
-#[allow(unused_imports)]
-use log::{debug, error, info, trace, warn};
-use na::{Matrix4, UnitQuaternion, Vector3, U1, U3};
+use na::{Matrix4, UnitQuaternion, Vector3};
 use std::{
     fmt::Debug,
     sync::{Arc, Weak},
@@ -77,7 +75,7 @@ impl Model {
     pub fn mat(&self) -> Matrix4<f32> {
         let s = self.scale;
         let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
-        t_mat.fixed_slice_mut::<U3, U1>(0, 3).copy_from(&self.pos);
+        t_mat.fixed_slice_mut::<3, 1>(0, 3).copy_from(&self.pos);
         t_mat
     }
     pub fn flat_v(&self) -> Vec<f32> {

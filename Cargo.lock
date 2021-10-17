@@ -16,7 +16,7 @@ checksum = "d708cb68c7106ed1844de68f50f0157a7788c2909a6926fad5a87546ef6a4ff8"
 dependencies = [
  "approx 0.3.2",
  "libm",
- "num-complex",
+ "num-complex 0.2.1",
  "num-traits 0.2.14",
 ]
 
@@ -51,6 +51,15 @@ name = "approx"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0e60b75072ecd4168020818c0107f2857bb6c4e64252d8d3983f6263b40a5c3"
+dependencies = [
+ "num-traits 0.2.14",
+]
+
+[[package]]
+name = "approx"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "072df7202e63b127ab55acfe16ce97013d5b97bf160489336d3f1840fd78e99e"
 dependencies = [
  "num-traits 0.2.14",
 ]
@@ -180,6 +189,12 @@ name = "bumpalo"
 version = "3.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9df67f7bf9ef8498769f994239c45613ef0c5899415fb58e9add412d2c1a538"
+
+[[package]]
+name = "bytemuck"
+version = "1.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72957246c41db82b8ef88a5486143830adeb8227ef9837740bdec67724cf2c5b"
 
 [[package]]
 name = "byteorder"
@@ -742,7 +757,7 @@ dependencies = [
  "jpeg-decoder",
  "lzw",
  "num-iter",
- "num-rational",
+ "num-rational 0.2.1",
  "num-traits 0.2.14",
  "png",
  "scoped_threadpool",
@@ -897,7 +912,16 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcfed72d871629daa12b25af198f110e8095d7650f5f4c61c5bac28364604f9b"
 dependencies = [
- "rawpointer",
+ "rawpointer 0.1.0",
+]
+
+[[package]]
+name = "matrixmultiply"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a8a15b776d9dfaecd44b03c5828c2199cddff5247215858aac14624f8d6b741"
+dependencies = [
+ "rawpointer 0.2.1",
 ]
 
 [[package]]
@@ -958,6 +982,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mint"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "793e84ff3f9a63214a5475097fac2a3e3674f862efcaeabebf5f4da36d7512ec"
+
+[[package]]
 name = "naga"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -981,11 +1011,39 @@ dependencies = [
  "alga",
  "approx 0.3.2",
  "generic-array",
- "matrixmultiply",
- "num-complex",
+ "matrixmultiply 0.2.2",
+ "num-complex 0.2.1",
  "num-traits 0.2.14",
  "rand 0.6.5",
  "typenum",
+]
+
+[[package]]
+name = "nalgebra"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d506eb7e08d6329505faa8a3a00a5dcc6de9f76e0c77e4b75763ae3c770831ff"
+dependencies = [
+ "approx 0.5.0",
+ "matrixmultiply 0.3.1",
+ "mint",
+ "nalgebra-macros",
+ "num-complex 0.4.0",
+ "num-rational 0.4.0",
+ "num-traits 0.2.14",
+ "simba",
+ "typenum",
+]
+
+[[package]]
+name = "nalgebra-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01fcc0b8149b4632adc89ac3b7b31a12fb6099a0317a4eb2ebff574ef7de7218"
+dependencies = [
+ "proc-macro2 1.0.30",
+ "quote 1.0.10",
+ "syn 1.0.80",
 ]
 
 [[package]]
@@ -1017,6 +1075,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-complex"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26873667bbbb7c5182d4a37c1add32cdf09f841af72da53318fdb81543c15085"
+dependencies = [
+ "num-traits 0.2.14",
+]
+
+[[package]]
 name = "num-derive"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1029,10 +1096,11 @@ dependencies = [
 
 [[package]]
 name = "num-integer"
-version = "0.1.39"
+version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e83d528d2677f0518c570baf2b7abdcf0cd2d248860b68507bdcb3e91d4c0cea"
+checksum = "d2cc698a63b549a70bc047073d2949cce27cd1c7b0a4a862d08a8031bc2801db"
 dependencies = [
+ "autocfg 1.0.1",
  "num-traits 0.2.14",
 ]
 
@@ -1052,6 +1120,17 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e96f040177bb3da242b5b1ecf3f54b5d5af3efbbfb18608977a5d2767b22f10"
 dependencies = [
+ "num-integer",
+ "num-traits 0.2.14",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d41702bd167c2df5520b384281bc111a4b5efcf7fbc4c9c222c815b07e0a6a6a"
+dependencies = [
+ "autocfg 1.0.1",
  "num-integer",
  "num-traits 0.2.14",
 ]
@@ -1222,6 +1301,12 @@ dependencies = [
  "smallvec 1.7.0",
  "winapi",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
 
 [[package]]
 name = "percent-encoding"
@@ -1484,6 +1569,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebac11a9d2e11f2af219b8b8d833b76b1ea0e054aa0e8d8e9e4cbde353bdf019"
 
 [[package]]
+name = "rawpointer"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
+
+[[package]]
 name = "rayon"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1608,6 +1699,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
+name = "safe_arch"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "794821e4ccb0d9f979512f9c1973480123f9bd62a90d74ab0f9426fcf8f4a529"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1715,6 +1815,19 @@ checksum = "5a9e7e0f2bfae24d8a5b5a66c5b257a83c7412304311512a0c054cd5e619da11"
 dependencies = [
  "lazy_static",
  "libc",
+]
+
+[[package]]
+name = "simba"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0b7840f121a46d63066ee7a99fc81dcabbc6105e437cae43528cea199b5a05f"
+dependencies = [
+ "approx 0.5.0",
+ "num-complex 0.4.0",
+ "num-traits 0.2.14",
+ "paste",
+ "wide",
 ]
 
 [[package]]
@@ -1913,7 +2026,7 @@ version = "0.1.0"
 dependencies = [
  "arrayvec 0.4.10",
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
  "simple_logger",
  "totality-events",
  "totality-gui",
@@ -1930,7 +2043,7 @@ name = "totality-events"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
 ]
 
 [[package]]
@@ -1949,7 +2062,7 @@ name = "totality-io"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
  "totality-events",
  "totality-threading",
  "winit",
@@ -1960,7 +2073,7 @@ name = "totality-model"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra",
+ "nalgebra 0.29.0",
 ]
 
 [[package]]
@@ -1973,7 +2086,7 @@ dependencies = [
  "gfx-backend-vulkan",
  "image",
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
  "shaderc",
  "simple_logger",
  "totality-model",
@@ -1988,7 +2101,7 @@ version = "0.1.0"
 dependencies = [
  "boomphf",
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
  "totality-model",
 ]
 
@@ -1997,7 +2110,7 @@ name = "totality-sim"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra",
+ "nalgebra 0.18.0",
  "totality-model",
  "totality-sync",
  "totality-threading",
@@ -2022,9 +2135,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.10.0"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"
+checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 
 [[package]]
 name = "unicode-width"
@@ -2216,6 +2329,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e15e44ba88ec415466e18e91881319e7c9e96cb905dc623305168aea65b85ccc"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "wide"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f2548e954f6619da26c140d020e99e59a2ca872a11f1e6250b829e8c96c893"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

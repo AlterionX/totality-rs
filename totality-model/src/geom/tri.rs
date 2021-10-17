@@ -26,20 +26,16 @@ impl TriGeom {
     ) -> TriGeom {
         TriGeom {
             vv: {
-                let mut vv_ = unsafe { VMat::new_uninitialized(3) };
-                vv_.copy_from(&vv);
-                vv_
+                VMat::from(vv.columns(0, 3))
             },
             ff: {
-                let mut ff_ = unsafe { FMat::new_uninitialized(1) };
-                ff_.copy_from(&f);
-                ff_
+                FMat::from_columns(&[f])
             },
             vec_vv: {
                 let mut vec_vv = Vec::with_capacity(vv.ncols() * size_of::<Vertex>());
                 for c in 0..vv.ncols() {
                     vec_vv.push(Vertex {
-                        pos: vv.column(c).into(),
+                        pos: vv.column(c).clone_owned().into(),
                         uv: uvs[c],
                     });
                 }
@@ -83,7 +79,7 @@ impl TriMeshGeom {
                 let mut vec_vv = Vec::with_capacity(vv.ncols() * size_of::<Vertex>());
                 for c in 0..vv.ncols() {
                     vec_vv.push(Vertex {
-                        pos: vv.column(c).into(),
+                        pos: vv.column(c).clone_owned().into(),
                         uv: uvs[c],
                     });
                 }
@@ -93,13 +89,13 @@ impl TriMeshGeom {
                 let mut vec_ff = Vec::with_capacity(ff.ncols() * size_of::<Face>());
                 for c in 0..ff.ncols() {
                     vec_ff.push(Face {
-                        verts: ff.column(c).into(),
+                        verts: ff.column(c).clone_owned().into(),
                     });
                 }
                 vec_ff
             },
-            vv: vv,
-            ff: ff,
+            vv,
+            ff,
             tex_file: texture_file,
         }
     }

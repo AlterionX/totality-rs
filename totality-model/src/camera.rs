@@ -1,4 +1,4 @@
-use na::{Matrix4, UnitQuaternion, Vector3, U1, U3};
+use na::{Matrix4, UnitQuaternion, Vector3};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Camera {
@@ -57,7 +57,7 @@ impl OrthoCamera {
         self._v_cache.fill_with_identity();
         self._v_cache[(2, 2)] = -1.;
         self._v_cache
-            .fixed_slice_mut::<U3, U1>(0, 3)
+            .fixed_slice_mut::<3, 1>(0, 3)
             .copy_from(&(self.position * -1.0));
     }
     pub fn trans(&mut self, shift: Vector3<f32>) {
@@ -134,7 +134,7 @@ impl PerspectiveCamera {
     fn calc_v_mat(&mut self) {
         self._v_cache = self.orientation.to_homogeneous();
         self._v_cache
-            .fixed_slice_mut::<U3, U1>(0, 3)
+            .fixed_slice_mut::<3, 1>(0, 3)
             .copy_from(&self.position);
         if !self._v_cache.try_inverse_mut() {
             panic!("Could not invert view matrix!");

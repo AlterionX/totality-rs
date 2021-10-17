@@ -3,12 +3,10 @@ pub mod tet;
 
 use std::{
     fmt::Debug,
-    mem::size_of,
+    mem::{size_of, MaybeUninit},
 };
 
-#[allow(unused_imports)]
-use log::{debug, error, info, trace, warn};
-use na::{Dynamic, Matrix, VecStorage, U3};
+use na::Matrix3xX;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct VertexInfo {
@@ -89,8 +87,8 @@ impl Face {
     }
 }
 
-pub type VMat = Matrix<f32, U3, Dynamic, VecStorage<f32, U3, Dynamic>>;
-pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
+pub type VMat = Matrix3xX<f32>;
+pub type FMat = Matrix3xX<u32>;
 
 pub trait Geom: Send + Sync + Debug {
     fn verts(&self) -> &VMat;
