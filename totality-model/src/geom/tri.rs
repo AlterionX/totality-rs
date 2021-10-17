@@ -3,12 +3,11 @@ use super::{VMat, FMat, Geom, Vertex, Face};
 use std::{
     fmt::Debug,
     mem::size_of,
-    sync::{Arc, Weak},
 };
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
-use na::{Dynamic, Matrix, Matrix3, UnitQuaternion, VecStorage, Vector3, U1, U3, U4};
+use na::{Matrix3, Vector3};
 
 #[derive(Clone, Debug)]
 pub struct TriGeom {

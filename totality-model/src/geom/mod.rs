@@ -4,12 +4,11 @@ pub mod tet;
 use std::{
     fmt::Debug,
     mem::size_of,
-    sync::{Arc, Weak},
 };
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
-use na::{Dynamic, Matrix, Matrix4, UnitQuaternion, VecStorage, Vector3, U1, U3, U4};
+use na::{Dynamic, Matrix, VecStorage, U3};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct VertexInfo {
@@ -96,10 +95,10 @@ pub type FMat = Matrix<u32, U3, Dynamic, VecStorage<u32, U3, Dynamic>>;
 pub trait Geom: Send + Sync + Debug {
     fn verts(&self) -> &VMat;
     fn faces(&self) -> &FMat;
-    fn culled_verts(&self, intersect_test: Box<IntersectTestable>) -> VMat {
+    fn culled_verts(&self, intersect_test: Box<dyn IntersectTestable>) -> VMat {
         self.verts().clone()
     }
-    fn culled_faces(&self, intersect_test: Box<IntersectTestable>) -> FMat {
+    fn culled_faces(&self, intersect_test: Box<dyn IntersectTestable>) -> FMat {
         self.faces().clone()
     }
     fn vert_cnt(&self) -> usize {
@@ -153,6 +152,6 @@ pub trait Geom: Send + Sync + Debug {
 }
 
 pub trait IntersectTestable {
-    fn intersects(&self, t: Box<Geom>) -> Option<()>;
+    fn intersects(&self, t: Box<dyn Geom>) -> Option<()>;
 }
 

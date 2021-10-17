@@ -1,19 +1,12 @@
 use crate::{
     Model,
-    geom::{FMat, Face, Geom, VMat, Vertex}
+    geom::Geom,
 };
-use na::{Matrix, Matrix3, Vector3, U2, U3};
-use std::{
-    mem::size_of,
-    sync::{Arc, Mutex, RwLock},
-};
-
-#[allow(dead_code)]
-use log::{debug, error, info, trace, warn};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Static {
-    pub objs: Vec<Arc<Box<Geom>>>,
+    pub objs: Vec<Arc<Box<dyn Geom>>>,
 }
 #[derive(Debug, Clone)]
 pub struct Dynamic {
@@ -22,8 +15,8 @@ pub struct Dynamic {
 
 pub struct Scene(Static, Dynamic);
 impl Scene {
-    pub fn new(gg: Vec<Arc<Box<Geom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
-        (Static { objs: gg }, Dynamic { mm: mm })
+    pub fn new(gg: Vec<Arc<Box<dyn Geom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
+        (Static { objs: gg }, Dynamic { mm })
     }
     pub fn split(self) -> (Static, Dynamic) {
         (self.0, self.1)

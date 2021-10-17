@@ -1,6 +1,4 @@
-#[allow(dead_code)]
-use log::{debug, error, info, trace, warn};
-use na::{Matrix4, UnitQuaternion, Vector3, Vector4, U1, U3, U4};
+use na::{Matrix4, UnitQuaternion, Vector3, U1, U3};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Camera {

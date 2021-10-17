@@ -1,6 +1,3 @@
-extern crate log;
-extern crate nalgebra as na;
-
 pub mod geom;
 pub mod camera;
 pub mod scene;
@@ -12,7 +9,6 @@ use log::{debug, error, info, trace, warn};
 use na::{Matrix4, UnitQuaternion, Vector3, U1, U3};
 use std::{
     fmt::Debug,
-    mem::size_of,
     sync::{Arc, Weak},
 };
 
@@ -24,13 +20,13 @@ pub struct Model {
     pub ori: UnitQuaternion<f32>,
     pub omg: UnitQuaternion<f32>,
     pub scale: f32,
-    pub source: Arc<Box<Geom>>,
+    pub source: Arc<Box<dyn Geom>>,
     should_render: bool,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
 }
 impl Model {
-    pub fn from_geom(g: Arc<Box<Geom>>) -> Model {
+    pub fn from_geom(g: Arc<Box<dyn Geom>>) -> Model {
         Model {
             pos: Vector3::zeros(),
             vel: Vector3::zeros(),
