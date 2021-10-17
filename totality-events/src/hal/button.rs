@@ -6,8 +6,8 @@ pub enum C {
     Ignored,
 }
 impl C {
-    fn default_value(&self) -> V {
-        V::default_value_of(&self)
+    pub fn default_value(&self) -> V {
+        V::default_value_of(self)
     }
 }
 impl From<V> for C {
@@ -100,8 +100,8 @@ impl From<bool> for State {
 impl From<State> for bool {
     fn from(s: State) -> bool {
         match s {
-            UP => false,
-            DOWN => true,
+            State::UP => false,
+            State::DOWN => true,
         }
     }
 }

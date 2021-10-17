@@ -8,6 +8,11 @@ pub enum C {
     CursorPos,
     ScreenSz,
 }
+impl C {
+    pub fn default_value(&self) -> V {
+        V::default_value_of(self)
+    }
+}
 impl From<V> for C {
     fn from(v: V) -> C {
         match v {

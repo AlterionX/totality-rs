@@ -28,7 +28,7 @@ impl<
 }
 pub struct CB<G, V: Categorized<C>, C: Hash + Eq + PartialEq + Copy + Clone> {
     c: C,
-    cb: Weak<Mutex<CBFn<G, V, C>>>,
+    cb: Weak<Mutex<dyn CBFn<G, V, C>>>,
 }
 impl<G, V: Categorized<C>, C: Hash + Eq + PartialEq + Copy + Clone> CB<G, V, C> {
     fn call(&self, s: &G, v: &V, l_t: &Instant, c_t: &Instant) -> Result<(), ()> {
@@ -40,7 +40,7 @@ impl<G, V: Categorized<C>, C: Hash + Eq + PartialEq + Copy + Clone> CB<G, V, C> 
             None => Result::Err(()),
         }
     }
-    pub fn new(c: C, cb: Weak<Mutex<CBFn<G, V, C>>>) -> Self {
+    pub fn new(c: C, cb: Weak<Mutex<dyn CBFn<G, V, C>>>) -> Self {
         CB { c: c, cb: cb }
     }
 }

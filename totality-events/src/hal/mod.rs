@@ -21,10 +21,10 @@ pub enum C {
 impl C {
     pub fn default_v(&self) -> V {
         match self {
-            C::A(a_c) => V::A(a::V::default_value_of(a_c)),
-            C::P(p_c) => V::P(p::V::default_value_of(p_c)),
-            C::B(b_c) => V::B(b::V::default_value_of(b_c)),
-            Ignored => V::Ignored,
+            C::A(a_c) => V::A(a_c.default_value()),
+            C::P(p_c) => V::P(p_c.default_value()),
+            C::B(b_c) => V::B(b_c.default_value()),
+            C::Ignored => V::Ignored,
             _ => unimplemented!("Category {:?} does not have a default value yet.", self),
         }
     }

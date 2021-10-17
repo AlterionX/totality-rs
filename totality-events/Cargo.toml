@@ -5,6 +5,7 @@ authors = ["AlterionX <ben.xu.cs@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-nalgebra = "0.18.0"
 log = "0.4.6"
-
+[dependencies.na]
+package = "nalgebra"
+version = "0.29.0"

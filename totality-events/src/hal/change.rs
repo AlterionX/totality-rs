@@ -69,7 +69,7 @@ impl<T> Ch<T> {
             after: ChV::Any,
         }
     }
-    fn satisfied_by<U>(&self, other: &Ch<U>) -> bool
+    pub fn satisfied_by<U>(&self, other: &Ch<U>) -> bool
     where
         T: PartialEq<U>,
     {
