@@ -2,12 +2,12 @@
 name = "totality-render"
 version = "0.1.0"
 authors = ["AlterionX <ben.benjamin.ben@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 totality-threading = { path = "../totality-threading" }
 totality-model = { path = "../totality-model" }
-gfx-hal = "0.2.0"
+wgpu-hal = "0.11.0"
 winit = "0.19.1"
 nalgebra = "0.18.0"
 image = "0.21.1"
