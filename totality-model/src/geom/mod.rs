@@ -3,7 +3,7 @@ pub mod tet;
 
 use std::{
     fmt::Debug,
-    mem::{size_of, MaybeUninit},
+    mem::size_of,
 };
 
 use na::Matrix3xX;

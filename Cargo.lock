@@ -2103,9 +2103,8 @@ name = "totality-sim"
 version = "0.1.0"
 dependencies = [
  "log",
- "nalgebra 0.18.0",
+ "nalgebra 0.29.0",
  "totality-model",
- "totality-sync",
  "totality-threading",
 ]
 

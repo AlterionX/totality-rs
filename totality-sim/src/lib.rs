@@ -1,27 +1,16 @@
-extern crate log;
-extern crate nalgebra as na;
-extern crate totality_model as geom;
-extern crate totality_threading as th;
-
 pub mod linkage;
 use linkage::*;
 
-use na::UnitQuaternion;
-use std::{
-    ops::DerefMut,
-    sync::{Arc, Mutex, RwLock, Weak},
-    time::Duration,
-};
+use std::time::Duration;
 
-#[allow(dead_code)]
-use log::{debug, error, info, trace, warn};
+use log::{info, trace};
 
 pub trait PhysicsHook<T>: FnMut(&geom::scene::Static, &mut T) + Send + 'static {}
 impl<T, F: FnMut(&geom::scene::Static, &mut T) + Send + 'static> PhysicsHook<T> for F {}
 
 struct Simulation<T: Simulated, DL: DataLinkage<T>> {
-    post_cbs: Vec<Box<PhysicsHook<T>>>,
-    pre_cbs: Vec<Box<PhysicsHook<T>>>,
+    post_cbs: Vec<Box<dyn PhysicsHook<T>>>,
+    pre_cbs: Vec<Box<dyn PhysicsHook<T>>>,
     time_step: Duration,
     dlink: DL,
 }
@@ -42,8 +31,8 @@ impl<T: Simulated, DL: DataLinkage<T>> Simulation<T, DL> {
     pub fn as_thread(
         d: Duration,
         dlink: DL,
-        post_cbs: Vec<Box<PhysicsHook<T>>>,
-        pre_cbs: Vec<Box<PhysicsHook<T>>>,
+        post_cbs: Vec<Box<dyn PhysicsHook<T>>>,
+        pre_cbs: Vec<Box<dyn PhysicsHook<T>>>,
     ) -> Result<th::killable_thread::KillableThread<(), ()>, std::io::Error> {
         th::create_duration_kt!(d, "Simulation", {
             let mut sim = {
@@ -73,8 +62,8 @@ impl Manager {
     pub fn new<T: Simulated, DL: DataLinkage<T>>(
         d: Duration,
         dl: DL,
-        post_cbs: Vec<Box<PhysicsHook<T>>>,
-        pre_cbs: Vec<Box<PhysicsHook<T>>>,
+        post_cbs: Vec<Box<dyn PhysicsHook<T>>>,
+        pre_cbs: Vec<Box<dyn PhysicsHook<T>>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             sim_th: Some(Simulation::as_thread(d, dl, post_cbs, pre_cbs)?),
