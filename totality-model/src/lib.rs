@@ -2,7 +2,7 @@ pub mod geom;
 pub mod camera;
 pub mod scene;
 
-use geom::Geom;
+use geom::tri::TriMeshGeom;
 
 use na::{Matrix4, UnitQuaternion, Vector3};
 use std::{
@@ -10,31 +10,55 @@ use std::{
     sync::{Arc, Weak},
 };
 
+#[derive(Debug, Clone)]
+pub struct AffineTransform {
+    pub pos: Vector3<f32>,
+    pub ori: UnitQuaternion<f32>,
+    pub scale: f32,
+}
+
+impl AffineTransform {
+    pub fn identity() -> Self {
+        Self {
+            pos: Vector3::zeros(),
+            ori: UnitQuaternion::identity(),
+            scale: 1.,
+        }
+    }
+
+    pub fn mat(&self) -> Matrix4<f32> {
+        let s = self.scale;
+        let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
+        t_mat.fixed_view_mut::<3, 1>(0, 3).copy_from(&self.pos);
+        t_mat
+    }
+}
+
 // TODO should this be a trait?
 #[derive(Debug, Clone)]
 pub struct Model {
-    pub pos: Vector3<f32>,
-    pub vel: Vector3<f32>,
-    pub ori: UnitQuaternion<f32>,
+    pub transform: AffineTransform,
+
+    pub source: Arc<TriMeshGeom>,
+
     pub omg: UnitQuaternion<f32>,
-    pub scale: f32,
-    pub source: Arc<Box<dyn Geom>>,
-    should_render: bool,
     children: Option<Arc<Vec<Arc<Model>>>>,
     parent: Option<Weak<Model>>,
+
+    should_render: bool,
 }
 impl Model {
-    pub fn from_geom(g: Arc<Box<dyn Geom>>) -> Model {
+    pub fn from_geom(g: Arc<TriMeshGeom>) -> Model {
         Model {
-            pos: Vector3::zeros(),
-            vel: Vector3::zeros(),
-            ori: UnitQuaternion::identity(),
-            omg: UnitQuaternion::identity(),
-            scale: 1.,
+            transform: AffineTransform::identity(),
+
             source: g.clone(),
-            should_render: false,
+
+            omg: UnitQuaternion::identity(),
             children: Option::None,
             parent: Option::None,
+
+            should_render: false,
         }
     }
 
@@ -46,47 +70,59 @@ impl Model {
         omg: UnitQuaternion<f32>,
         scale: f32,
     ) {
-        self.set_pos(p);
-        self.set_vel(v);
-        self.set_ori(o);
         self.set_omg(omg);
-        self.set_scale(scale);
-    }
-    pub fn set_pos(&mut self, p: Vector3<f32>) {
-        self.pos = p;
-    }
-    pub fn set_vel(&mut self, v: Vector3<f32>) {
-        self.vel = v;
-    }
-    pub fn set_ori(&mut self, o: UnitQuaternion<f32>) {
-        self.ori = o;
     }
     pub fn set_omg(&mut self, o: UnitQuaternion<f32>) {
         self.omg = o;
-    }
-    pub fn set_scale(&mut self, scale: f32) {
-        self.scale = scale;
     }
 
     pub fn set_should_render(&mut self, b: bool) {
         self.should_render = b;
     }
-
-    pub fn mat(&self) -> Matrix4<f32> {
-        let s = self.scale;
-        let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_partial_diagonal(&[s, s, s, 1.0]);
-        t_mat.fixed_slice_mut::<3, 1>(0, 3).copy_from(&self.pos);
-        t_mat
-    }
-    pub fn flat_v(&self) -> Vec<f32> {
-        self.source.flattened_verts_as_floats()
-    }
-    pub fn vv_as_bytes(&self) -> Vec<u32> {
-        self.source.flattened_verts_as_bytes()
-    }
-    pub fn ff_as_bytes(&self) -> Vec<u32> {
-        self.source.flattened_faces_as_bytes()
-    }
 }
 unsafe impl Send for Model {}
 
+/// Generates the mesh of a unit cube, centered on the origin.
+pub fn unit_cube(texture: Option<String>) -> TriMeshGeom {
+    TriMeshGeom::new(
+        geom::VMat::from_iterator(
+            8,
+            [
+                -0.5, -0.5, -0.5, // left bottom rear
+                -0.5, -0.5,  0.5, // left bottom front
+                -0.5,  0.5, -0.5, // left top rear
+                -0.5,  0.5,  0.5, // left top front
+                 0.5, -0.5, -0.5, // right bottom rear
+                 0.5, -0.5,  0.5, // right bottom front
+                 0.5,  0.5, -0.5, // right top rear
+                 0.5,  0.5,  0.5, // right top front
+            ]
+            .into_iter(),
+        ),
+        geom::FMat::from_iterator(
+            12,
+            vec![
+                1, 4, 0, 5, 4, 1, // bottom
+                6, 3, 2, 7, 3, 6, // top
+                0, 2, 1, 3, 1, 2, // left
+                4, 7, 6, 5, 7, 4, // right
+                0, 6, 2, 6, 0, 4, // back
+                5, 3, 7, 3, 5, 1, // front
+            ]
+            .into_iter(),
+        ),
+        vec![[0.0, 0.0, 0.0]; 8],
+        vec![[0.0, 0.0, 0.0]; 12],
+        vec![
+            [0f32, 0f32],
+            [1f32, 0f32],
+            [0f32, 1f32],
+            [1f32, 1f32],
+            [0f32, 1f32],
+            [1f32, 1f32],
+            [0f32, 0f32],
+            [1f32, 0f32],
+        ],
+        texture,
+    )
+}

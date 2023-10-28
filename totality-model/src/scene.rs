@@ -1,12 +1,9 @@
-use crate::{
-    Model,
-    geom::Geom,
-};
+use crate::{Model, geom::tri::TriMeshGeom};
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Static {
-    pub objs: Vec<Arc<Box<dyn Geom>>>,
+    pub objs: Vec<Arc<Box<TriMeshGeom>>>,
 }
 #[derive(Debug, Clone)]
 pub struct Dynamic {
@@ -15,7 +12,7 @@ pub struct Dynamic {
 
 pub struct Scene(Static, Dynamic);
 impl Scene {
-    pub fn new(gg: Vec<Arc<Box<dyn Geom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
+    pub fn new(gg: Vec<Arc<Box<TriMeshGeom>>>, mm: Vec<Model>) -> (Static, Dynamic) {
         (Static { objs: gg }, Dynamic { mm })
     }
     pub fn split(self) -> (Static, Dynamic) {

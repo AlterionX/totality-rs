@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = [
     "totality",             # manages everything inbetween and serves as a reference implementation
     # Reliant on one or more of the children libs
