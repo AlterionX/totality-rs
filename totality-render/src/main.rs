@@ -86,7 +86,7 @@ impl<'a> RenderThread<'a> {
             [0., 0., 0.],
             None,
         );
-        let cube_mesh = model::unit_cube(&mut alloc, None);
+        let cube_mesh = Box::leak(Box::new(model::unit_cube(&mut alloc, None)));
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
         let clear_color_mode = 0;
@@ -108,7 +108,7 @@ impl<'a> RenderThread<'a> {
                 })],
             },
             DrawTask {
-                mesh: Cow::Owned(cube_mesh.clone()),
+                mesh: Cow::Borrowed(cube_mesh),
                 instancing_information: vec![
                     Cow::Owned({
                         let mut transform = AffineTransform::identity();
