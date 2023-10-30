@@ -267,6 +267,13 @@ pub struct Renderer {
 
     // TODO: better map for window ids?
     windowed_swapchain: HashMap<WindowId, RendererWindowSwapchain>,
+
+    // Mesh id to (vertex, index) buffer offsets.
+    loaded_models: HashMap<u64, (i32, u32)>,
+    vertex_free_byte_start: u64,
+    index_free_byte_start: u64,
+    vertex_free_start: i32,
+    index_free_start: u32,
 }
 
 impl Renderer {
@@ -605,6 +612,12 @@ impl Renderer {
 
             // 1 since that's the typical usecase. 0 would be unused.
             windowed_swapchain: HashMap::with_capacity(1),
+
+            loaded_models: HashMap::new(),
+            index_free_byte_start: 0,
+            index_free_start: 0,
+            vertex_free_byte_start: 0,
+            vertex_free_start: 0,
         })
     }
 
@@ -639,16 +652,25 @@ impl Renderer {
         log::info!("RENDER-PASS-INIT");
 
         {
-            let mut current_vertex_buffer_idx = 0 as u64;
-            let mut current_face_buffer_idx = 0 as u64;
             for draw in task.draws.iter() {
+                let mesh_id = draw.mesh.mesh_id;
+                if self.loaded_models.contains_key(&mesh_id) {
+                    log::info!("RENDER-COPY mesh={mesh_id} already_loaded=true");
+                    continue;
+                }
+
+                Self::copy_sized_slice_to_buffer(&self.vertex_buffer.clone().slice(self.vertex_free_byte_start..), draw.mesh.vec_vv.as_slice()).unwrap();
+                Self::copy_sized_slice_to_buffer(&self.face_buffer.clone().slice(self.index_free_byte_start..), draw.mesh.ff.as_slice()).unwrap();
+                self.loaded_models.insert(draw.mesh.mesh_id, (self.vertex_free_start, self.index_free_start));
+
+                self.vertex_free_start += draw.mesh.vec_vv.len() as i32;
+                self.index_free_start += draw.mesh.ff.len() as u32;
                 let vblen = bytemuck::cast_slice::<_, u8>(draw.mesh.vec_vv.as_slice()).len() as u64;
                 let fblen = bytemuck::cast_slice::<_, u8>(draw.mesh.ff.as_slice()).len() as u64;
-                log::info!("RENDER-COPY vertex_start={current_vertex_buffer_idx} vertex_len={vblen} face_start={current_face_buffer_idx} face_len={fblen}");
-                Self::copy_sized_slice_to_buffer(&self.vertex_buffer.clone().slice(current_vertex_buffer_idx..(current_vertex_buffer_idx + vblen)), draw.mesh.vec_vv.as_slice()).unwrap();
-                Self::copy_sized_slice_to_buffer(&self.face_buffer.clone().slice(current_face_buffer_idx..(current_face_buffer_idx + fblen)), draw.mesh.ff.as_slice()).unwrap();
-                current_vertex_buffer_idx += vblen;
-                current_face_buffer_idx += fblen;
+                self.vertex_free_byte_start += vblen;
+                self.index_free_byte_start += fblen;
+
+                log::info!("RENDER-COPY mesh={mesh_id} vertex_start={} vertex_len={vblen} face_start={} face_len={fblen}", self.vertex_free_byte_start, self.index_free_byte_start);
             }
             Self::copy_sized_slice_to_buffer(&self.uniform_per_mesh_buffer, task.instancing_information_bytes().as_slice()).unwrap();
         }
@@ -816,10 +838,9 @@ impl Renderer {
             .unwrap()
             .bind_index_buffer(IndexBuffer::U32(self.face_buffer.clone().reinterpret()))
             .unwrap();
-        let mut current_vertex_buffer_idx = 0;
-        let mut current_index_buffer_idx = 0;
         let mut current_instance_buffer_idx = 0;
         for draw in task.draws.iter() {
+            let (current_vertex_buffer_idx, current_index_buffer_idx) = self.loaded_models[&draw.mesh.mesh_id];
             let vert_count = draw.mesh.vec_vv.len() as i32;
             let index_count = draw.mesh.ff.len() as u32;
             let instance_count = draw.instancing_information.len() as u32;
@@ -834,8 +855,6 @@ impl Renderer {
                     current_instance_buffer_idx,
                 )
                 .unwrap();
-            current_vertex_buffer_idx += vert_count;
-            current_index_buffer_idx += index_count;
             current_instance_buffer_idx += instance_count;
         }
         builder
