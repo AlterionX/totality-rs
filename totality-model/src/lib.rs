@@ -27,7 +27,7 @@ impl AffineTransform {
     }
 
     pub fn mat(&self) -> Matrix4<f32> {
-        let mut t_mat = Matrix4::from_diagonal(&self.scaling) * self.ori.to_homogeneous();
+        let mut t_mat = self.ori.to_homogeneous() * Matrix4::from_diagonal(&self.scaling);
         t_mat.fixed_view_mut::<3, 1>(0, 3).copy_from(&self.pos);
         t_mat
     }

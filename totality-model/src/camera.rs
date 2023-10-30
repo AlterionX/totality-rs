@@ -151,6 +151,15 @@ impl PerspectiveCamera {
         self.position
     }
 }
+impl PerspectiveCamera {
+    // For the unit quaternion, the rotation axis has shifted:
+    //   roll is about the x axis (and thus functions as pitch in our world space)
+    //   pitch is about the y axis (and thus functions as yaw in our world space)
+    //   yaw is about the z axis (and thus functions as roll in our world space)
+    pub fn from_euler(pitch: f32, yaw: f32, roll: f32) -> UnitQuaternion<f32> {
+        UnitQuaternion::from_euler_angles(pitch, yaw, roll)
+    }
+}
 impl Default for PerspectiveCamera {
     fn default() -> Self {
         let mut cam = PerspectiveCamera {
@@ -166,7 +175,12 @@ impl Default for PerspectiveCamera {
         // The camera, by default, looks in the positive z direction, with positive y facing
         // upwards. However, we usually pretend we're looking "into" a scene, so we'll move
         // "forward" a little.
-        cam.trans(Vector3::new(0.0, 0.0, 5.0));
+        cam.trans(Vector3::new(5.0, 5.0, 5.0));
+        cam.rot(PerspectiveCamera::from_euler(
+            -std::f32::consts::FRAC_PI_4,
+            std::f32::consts::FRAC_PI_4,
+            0.,
+        ));
         cam.calc_p_mat();
         cam.calc_v_mat();
         cam

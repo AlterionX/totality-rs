@@ -112,30 +112,30 @@ impl<'a> RenderThread<'a> {
                 instancing_information: vec![
                     Cow::Owned({
                         let mut transform = AffineTransform::identity();
-                        transform.pos += Vector3::new(0.5, 0., 0.);
+                        transform.pos += Vector3::new(0.7, 0., 1.);
                         transform
                     }),
                     Cow::Owned({
                         let mut transform = AffineTransform::identity();
-                        transform.pos += Vector3::new(1.5, 0., 0.);
+                        transform.pos += Vector3::new(1.7, 0., 1.);
                         transform
                     }),
                     Cow::Owned({
                         let mut transform = AffineTransform::identity();
-                        transform.pos += Vector3::new(-0.5, 0., 0.);
+                        transform.pos += Vector3::new(2.7, 0., 1.);
                         transform
                     }),
                     Cow::Owned({
                         // x axis
                         let mut transform = AffineTransform::identity();
                         transform.pos += Vector3::new(1., 0., 0.);
-                        transform.ori = UnitQuaternion::new(Vector3::z() * std::f32::consts::FRAC_PI_2);
+                        transform.ori = UnitQuaternion::new(Vector3::y() * std::f32::consts::FRAC_PI_2);
+                        transform.scaling.x = 0.2;
                         transform.scaling.y = 0.2;
-                        transform.scaling.z = 0.2;
                         transform
                     }),
                     Cow::Owned({
-                        // y axis, this is the natural orientation
+                        // y axis, this is the "natural" orientation
                         let mut transform = AffineTransform::identity();
                         transform.pos += Vector3::new(0., 1., 0.);
                         transform.scaling.x = 0.2;
@@ -146,7 +146,6 @@ impl<'a> RenderThread<'a> {
                         // z axis
                         let mut transform = AffineTransform::identity();
                         transform.pos += Vector3::new(0., 0., 1.);
-                        transform.ori = UnitQuaternion::new(Vector3::x() * std::f32::consts::FRAC_PI_2);
                         transform.scaling.x = 0.2;
                         transform.scaling.y = 0.2;
                         transform
@@ -334,10 +333,10 @@ fn main() {
                             tx.send(WorldEvent::SetMoveRight(key_in.state.is_pressed())).unwrap();
                         },
                         KeyCode::KeyQ => {
-                            tx.send(WorldEvent::SetRollLeft(key_in.state.is_pressed())).unwrap();
+                            tx.send(WorldEvent::SetRollRight(key_in.state.is_pressed())).unwrap();
                         },
                         KeyCode::KeyE => {
-                            tx.send(WorldEvent::SetRollRight(key_in.state.is_pressed())).unwrap();
+                            tx.send(WorldEvent::SetRollLeft(key_in.state.is_pressed())).unwrap();
                         },
                         KeyCode::Space => {
                             tx.send(WorldEvent::SetMoveUp(key_in.state.is_pressed())).unwrap();
