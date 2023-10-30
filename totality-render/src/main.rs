@@ -2,7 +2,7 @@
 
 use std::{sync::{Arc, mpsc::{self, Receiver}}, borrow::Cow};
 
-use model::{geom::tri::TriMeshGeom, AffineTransform, camera::{Camera, PerspectiveCamera}};
+use model::{geom::{tri::TriMeshGeom, MeshAlloc}, AffineTransform, camera::{Camera, PerspectiveCamera}};
 use na::{Matrix3, Vector3, UnitQuaternion};
 use winit::{
     event_loop::{EventLoop, ControlFlow},
@@ -72,8 +72,10 @@ impl<'a> RenderThread<'a> {
 
         let camera = Camera::Perspective(PerspectiveCamera::default());
 
+        let mut alloc = MeshAlloc::new();
         // Load up! This one's a simple triangle.
         let triangle_mesh = TriMeshGeom::triangle(
+            &mut alloc,
             Matrix3::new(
                 0.0, 0.5, 0.0,
                 0.5, 0.0, 0.0,
@@ -84,8 +86,7 @@ impl<'a> RenderThread<'a> {
             [0., 0., 0.],
             None,
         );
-        let cube_mesh = model::unit_cube(None);
-        let axis_mesh = model::coordinate_axis(None);
+        let cube_mesh = model::unit_cube(&mut alloc, None);
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
         let clear_color_mode = 0;
@@ -107,7 +108,7 @@ impl<'a> RenderThread<'a> {
                 })],
             },
             DrawTask {
-                mesh: Cow::Owned(cube_mesh),
+                mesh: Cow::Owned(cube_mesh.clone()),
                 instancing_information: vec![
                     Cow::Owned({
                         let mut transform = AffineTransform::identity();
@@ -123,29 +124,34 @@ impl<'a> RenderThread<'a> {
                         let mut transform = AffineTransform::identity();
                         transform.pos += Vector3::new(-0.5, 0., 0.);
                         transform
-                    })
+                    }),
+                    Cow::Owned({
+                        // x axis
+                        let mut transform = AffineTransform::identity();
+                        transform.pos += Vector3::new(1., 0., 0.);
+                        transform.ori = UnitQuaternion::new(Vector3::z() * std::f32::consts::FRAC_PI_2);
+                        transform.scaling.y = 0.2;
+                        transform.scaling.z = 0.2;
+                        transform
+                    }),
+                    Cow::Owned({
+                        // y axis, this is the natural orientation
+                        let mut transform = AffineTransform::identity();
+                        transform.pos += Vector3::new(0., 1., 0.);
+                        transform.scaling.x = 0.2;
+                        transform.scaling.z = 0.2;
+                        transform
+                    }),
+                    Cow::Owned({
+                        // z axis
+                        let mut transform = AffineTransform::identity();
+                        transform.pos += Vector3::new(0., 0., 1.);
+                        transform.ori = UnitQuaternion::new(Vector3::x() * std::f32::consts::FRAC_PI_2);
+                        transform.scaling.x = 0.2;
+                        transform.scaling.y = 0.2;
+                        transform
+                    }),
                 ],
-            },
-            DrawTask {
-                mesh: Cow::Owned(axis_mesh),
-                instancing_information: vec![Cow::Owned({
-                    // x axis
-                    let mut transform = AffineTransform::identity();
-                    transform.pos += Vector3::new(1., 0., 0.);
-                    transform.ori = UnitQuaternion::new(Vector3::z() * std::f32::consts::FRAC_PI_2);
-                    transform
-                }), Cow::Owned({
-                    // y axis, this is the natural orientation
-                    let mut transform = AffineTransform::identity();
-                    transform.pos += Vector3::new(0., 1., 0.);
-                    transform
-                }), Cow::Owned({
-                    // z axis
-                    let mut transform = AffineTransform::identity();
-                    transform.pos += Vector3::new(0., 0., 1.);
-                    transform.ori = UnitQuaternion::new(Vector3::x() * std::f32::consts::FRAC_PI_2);
-                    transform
-                })],
             },
         ];
 

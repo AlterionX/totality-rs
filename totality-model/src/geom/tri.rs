@@ -1,6 +1,6 @@
 use na::Matrix3;
 
-use super::{VMat, FMat, Vertex, Face};
+use super::{VMat, FMat, Vertex, Face, MeshAlloc};
 
 use std::{
     fmt::Debug,
@@ -9,6 +9,8 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct TriMeshGeom {
+    // Used for loading optimization.
+    pub mesh_id: u64,
     pub vv: VMat,
     pub ff: FMat,
     pub vec_vv: Vec<Vertex>,
@@ -16,8 +18,9 @@ pub struct TriMeshGeom {
     pub tex_file: Option<String>,
 }
 impl TriMeshGeom {
-    pub fn new(vv: VMat, ff: FMat, vertex_norms: Vec<[f32; 3]>, face_norms: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, texture_file: Option<String>) -> Self {
+    pub fn new(mesh_alloc: &mut MeshAlloc, vv: VMat, ff: FMat, vertex_norms: Vec<[f32; 3]>, face_norms: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, texture_file: Option<String>) -> Self {
         Self {
+            mesh_id: mesh_alloc.alloc_id(),
             vec_vv: {
                 let mut vec_vv = Vec::with_capacity(vv.ncols() * size_of::<Vertex>());
                 for c in 0..vv.ncols() {
@@ -48,6 +51,7 @@ impl TriMeshGeom {
     }
 
     pub fn triangle(
+        mesh_alloc: &mut MeshAlloc,
         // Assumes this is in order
         vv: Matrix3<f32>,
         vertex_norms: [[f32; 3]; 3],
@@ -56,6 +60,7 @@ impl TriMeshGeom {
         texture_file: Option<String>,
     ) -> Self {
         Self {
+            mesh_id: mesh_alloc.alloc_id(),
             vv: {
                 VMat::from(vv.columns(0, 3))
             },

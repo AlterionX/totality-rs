@@ -42,3 +42,18 @@ unsafe impl bytemuck::Pod for Material {}
 
 pub type VMat = Matrix3xX<f32>;
 pub type FMat = Matrix3xX<u32>;
+
+pub struct MeshAlloc {
+    counter: u64,
+}
+
+impl MeshAlloc {
+    pub fn new() -> Self {
+        Self { counter: 0 }
+    }
+    pub (crate) fn alloc_id(&mut self) -> u64 {
+        let c = self.counter;
+        self.counter += 1;
+        c
+    }
+}
