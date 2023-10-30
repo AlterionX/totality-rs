@@ -3,7 +3,6 @@ mod shaders;
 
 use std::{sync::Arc, collections::{HashMap, hash_map::Entry}};
 
-use na::Matrix4;
 use tap::{TapFallible, TapOptional};
 use task::RenderTask;
 use thiserror::Error;
@@ -13,7 +12,7 @@ use vulkano::{
     VulkanError,
     instance::{
         Instance,
-        InstanceCreateInfo, InstanceExtensions,
+        InstanceCreateInfo,
     },
     LoadingError,
     Version,
@@ -42,7 +41,6 @@ use vulkano::{
         StandardMemoryAllocator,
         AllocationCreateInfo,
         MemoryTypeFilter,
-        MemoryAllocator,
     },
     buffer::{
         Buffer,
@@ -50,6 +48,7 @@ use vulkano::{
         BufferUsage,
         Subbuffer,
         AllocateBufferError,
+        IndexBuffer,
     },
     command_buffer::{
         allocator::{
@@ -70,17 +69,22 @@ use vulkano::{
         Image,
         view::ImageView,
         SampleCount,
+        ImageCreateInfo,
+        ImageType,
     },
     format::{
         Format,
-        ClearColorValue,
+        ClearValue,
     },
     render_pass::{
         RenderPass,
         Framebuffer,
         Subpass,
     },
-    shader::{ShaderModule, ShaderStages},
+    shader::{
+        ShaderModule,
+        ShaderStages,
+    },
     sync::{
         HostAccessError,
         GpuFuture,
@@ -89,7 +93,10 @@ use vulkano::{
         GraphicsPipeline,
         graphics::{
             GraphicsPipelineCreateInfo,
-            rasterization::RasterizationState,
+            rasterization::{
+                RasterizationState,
+                CullMode,
+            },
             input_assembly::{
                 InputAssemblyState,
                 PrimitiveTopology,
@@ -111,18 +118,41 @@ use vulkano::{
                 ColorBlendState,
                 ColorBlendAttachmentState,
             },
+            depth_stencil::{
+                DepthStencilState,
+                DepthState,
+            },
         },
         PipelineLayout,
         layout::{
             PipelineLayoutCreateInfo,
-            PipelineLayoutCreateFlags, PushConstantRange,
+            PipelineLayoutCreateFlags,
+            PushConstantRange,
         },
         PipelineShaderStageCreateInfo, PipelineBindPoint,
-    }, descriptor_set::{pool::{DescriptorPool, DescriptorPoolCreateInfo, DescriptorPoolCreateFlags, DescriptorSetAllocateInfo}, layout::{DescriptorType, DescriptorSetLayout, DescriptorSetLayoutCreateInfo, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutBinding, DescriptorBindingFlags}, allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo, DescriptorSetAllocator, StandardDescriptorSetAlloc}, PersistentDescriptorSet, WriteDescriptorSet},
+    },
+    descriptor_set::{
+        pool::{
+            DescriptorPool,
+            DescriptorPoolCreateInfo,
+            DescriptorPoolCreateFlags,
+        },
+        layout::{
+            DescriptorType,
+            DescriptorSetLayout,
+            DescriptorSetLayoutCreateInfo,
+            DescriptorSetLayoutCreateFlags,
+            DescriptorSetLayoutBinding,
+        },
+        allocator::{
+            StandardDescriptorSetAllocator,
+            StandardDescriptorSetAllocatorCreateInfo,
+        },
+        PersistentDescriptorSet,
+        WriteDescriptorSet,
+    },
 };
 use winit::{window::{WindowId, Window}, dpi::PhysicalSize};
-
-use model::geom::tri::TriMeshGeom;
 
 #[derive(Debug, Default)]
 pub struct RendererPreferences {
@@ -252,7 +282,7 @@ impl Renderer {
                 engine_version: Version::default(),
                 application_name,
                 application_version: application_version.unwrap_or_default(),
-                enabled_layers: vec!["VK_LAYER_KHRONOS_validation".to_owned(), "VK_LAYER_LUNARG_api_dump".to_owned()],
+                // enabled_layers: vec!["VK_LAYER_KHRONOS_validation".to_owned(), "VK_LAYER_LUNARG_api_dump".to_owned()],
                 ..Default::default()
             }
         )
@@ -321,10 +351,7 @@ impl Renderer {
         // TODO Reevaluate if we can adjust the memory allocator.
         let device_memory_alloc = Arc::new(StandardMemoryAllocator::new_default(Arc::clone(&selected_device)));
         // TODO Can we get rid of this?
-        fn upcast(a: Arc<StandardMemoryAllocator>) -> Arc<dyn MemoryAllocator> {
-            a
-        }
-        let dyn_device_memory_alloc = upcast(Arc::clone(&device_memory_alloc));
+        let dyn_device_memory_alloc = Arc::clone(&device_memory_alloc) as _;
 
         // Let's just allocate a giant chunk for vertices.
         let vertex_buffer = Buffer::new_unsized(
@@ -535,7 +562,7 @@ impl Renderer {
                     })
                 ),
                 WriteDescriptorSet::buffer_array(
-                    0,
+                    1,
                     0,
                     (0..1024).map(|idx| {
                         let start = idx * 16;
@@ -586,20 +613,10 @@ impl Renderer {
             buffer.mapped_slice()?.as_mut()
         };
 
-        let num_bytes_to_copy = to_copy.len() * std::mem::size_of::<T>();
-        mapped_buffer[..num_bytes_to_copy].copy_from_slice(bytemuck::cast_slice(to_copy));
-
-        Ok(())
-    }
-
-    pub fn load_model(
-        &self,
-        mesh: TriMeshGeom,
-    ) -> Result<(), HostAccessError> {
-        // TODO This copying stuff can be better.
-
-        Self::copy_sized_slice_to_buffer(&self.vertex_buffer, mesh.vec_vv.as_slice())?;
-        Self::copy_sized_slice_to_buffer(&self.face_buffer, mesh.vec_ff.as_slice())?;
+        let cast_slice = bytemuck::cast_slice(to_copy);
+        log::info!("RENDER-COPY-DATA {cast_slice:?}");
+        let num_bytes_to_copy = cast_slice.len();
+        mapped_buffer[..num_bytes_to_copy].copy_from_slice(cast_slice);
 
         Ok(())
     }
@@ -608,12 +625,12 @@ impl Renderer {
         let mut e = self.windowed_swapchain.entry(window.id());
         let window_swapchain = match e {
             Entry::Vacant(v) => {
-                v.insert(RendererWindowSwapchain::generate_swapchain(&self.vulkan, &window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device).unwrap())
+                v.insert(RendererWindowSwapchain::generate_swapchain(&self.vulkan, &window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device, &self.device_memory_alloc).unwrap())
             },
             Entry::Occupied(ref mut o) => {
                 let swapchain_information = o.get_mut();
                 if swapchain_information.is_stale_for_window(&window) {
-                    swapchain_information.regenerated_swapchain(&window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device).unwrap();
+                    swapchain_information.regenerated_swapchain(&window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device, &self.device_memory_alloc).unwrap();
                 }
                 swapchain_information
             },
@@ -621,9 +638,20 @@ impl Renderer {
 
         log::info!("RENDER-PASS-INIT");
 
-        Self::copy_sized_slice_to_buffer(
-            &self.uniform_per_mesh_buffer, task.instancing_information_bytes().as_slice()
-        ).unwrap();
+        {
+            let mut current_vertex_buffer_idx = 0 as u64;
+            let mut current_face_buffer_idx = 0 as u64;
+            for draw in task.draws.iter() {
+                let vblen = bytemuck::cast_slice::<_, u8>(draw.mesh.vec_vv.as_slice()).len() as u64;
+                let fblen = bytemuck::cast_slice::<_, u8>(draw.mesh.ff.as_slice()).len() as u64;
+                log::info!("RENDER-COPY vertex_start={current_vertex_buffer_idx} vertex_len={vblen} face_start={current_face_buffer_idx} face_len={fblen}");
+                Self::copy_sized_slice_to_buffer(&self.vertex_buffer.clone().slice(current_vertex_buffer_idx..(current_vertex_buffer_idx + vblen)), draw.mesh.vec_vv.as_slice()).unwrap();
+                Self::copy_sized_slice_to_buffer(&self.face_buffer.clone().slice(current_face_buffer_idx..(current_face_buffer_idx + fblen)), draw.mesh.ff.as_slice()).unwrap();
+                current_vertex_buffer_idx += vblen;
+                current_face_buffer_idx += fblen;
+            }
+            Self::copy_sized_slice_to_buffer(&self.uniform_per_mesh_buffer, task.instancing_information_bytes().as_slice()).unwrap();
+        }
 
         let (active_framebuffer, afidx, framebuffer_future) = {
             let (mut preferred, mut suboptimal, mut acquire_next_image) = swapchain::acquire_next_image(Arc::clone(&window_swapchain.swapchain), None).unwrap();
@@ -631,7 +659,7 @@ impl Renderer {
             let mut times_recreated = 0;
             while suboptimal && times_recreated < MAX_RECREATION_OCCURRENCES {
                 times_recreated += 1;
-                window_swapchain.regenerated_swapchain(&window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device).unwrap();
+                window_swapchain.regenerated_swapchain(&window, &self.ordered_physical_devices[self.selected_physical_device_idx], &self.selected_device, &self.device_memory_alloc).unwrap();
                 let n = swapchain::acquire_next_image(Arc::clone(&window_swapchain.swapchain), None).unwrap();
                 preferred = n.0;
                 suboptimal = n.1;
@@ -649,7 +677,10 @@ impl Renderer {
                     PipelineShaderStageCreateInfo::new(self.vertex_shader.entry_point("main").unwrap()),
                     PipelineShaderStageCreateInfo::new(self.fragment_shader.entry_point("main").unwrap()),
                 ].into_iter().collect(),
-                rasterization_state: Some(RasterizationState::default()),
+                rasterization_state: Some(RasterizationState {
+                    cull_mode: CullMode::Back,
+                    ..RasterizationState::default()
+                }),
                 input_assembly_state: Some(InputAssemblyState {
                     topology: PrimitiveTopology::TriangleList,
                     ..Default::default()
@@ -722,6 +753,10 @@ impl Renderer {
                     subpass.num_color_attachments(),
                     ColorBlendAttachmentState::default(),
                 )),
+                depth_stencil_state: Some(DepthStencilState {
+                    depth: Some(DepthState::simple()),
+                    ..Default::default()
+                }),
                 subpass: Some(PipelineSubpassType::BeginRenderPass(subpass)),
                 ..GraphicsPipelineCreateInfo::layout(Arc::clone(&self.pipeline_layout))
             }
@@ -737,7 +772,10 @@ impl Renderer {
         builder
             .begin_render_pass(
                 RenderPassBeginInfo {
-                    clear_values: vec![Some(task.clear_color.clone().into())],
+                    clear_values: vec![
+                        Some(task.clear_color.clone().into()),
+                        Some(ClearValue::Depth(1f32))
+                    ],
                     ..RenderPassBeginInfo::framebuffer(Arc::clone(&window_swapchain.images[0].framebuffer))
                 },
                 SubpassBeginInfo {
@@ -772,18 +810,35 @@ impl Renderer {
             .unwrap()
             .push_constants(Arc::clone(&self.pipeline_layout), 0, task.cam.get_vp_mat())
             .unwrap()
-            .push_constants(Arc::clone(&self.pipeline_layout), 64, 0u32)
-            .unwrap()
-            .push_constants(Arc::clone(&self.pipeline_layout), 68, 0u32)
-            .unwrap()
-            .push_constants(Arc::clone(&self.pipeline_layout), 72, 0u32)
-            .unwrap()
-            .push_constants(Arc::clone(&self.pipeline_layout), 76, 0u32)
+            .push_constants(Arc::clone(&self.pipeline_layout), 64, [0.0f32, 0.0f32, 0.0f32, 0.0f32])
             .unwrap()
             .bind_descriptor_sets(PipelineBindPoint::Graphics, Arc::clone(&self.pipeline_layout), 0, Arc::clone(&self.descriptor_set))
             .unwrap()
-            .draw(3, 1, 0, 0)
-            .unwrap()
+            .bind_index_buffer(IndexBuffer::U32(self.face_buffer.clone().reinterpret()))
+            .unwrap();
+        let mut current_vertex_buffer_idx = 0;
+        let mut current_index_buffer_idx = 0;
+        let mut current_instance_buffer_idx = 0;
+        for draw in task.draws.iter() {
+            let vert_count = draw.mesh.vec_vv.len() as i32;
+            let index_count = draw.mesh.ff.len() as u32;
+            let instance_count = draw.instancing_information.len() as u32;
+            log::info!("RENDER-PASS-DRAW vertex_start={current_vertex_buffer_idx} vertex_count={vert_count} index_start={current_index_buffer_idx} index_count={index_count} instance_start={current_instance_buffer_idx} instance_count={instance_count}");
+
+            builder
+                .draw_indexed(
+                    index_count,
+                    instance_count,
+                    current_index_buffer_idx,
+                    current_vertex_buffer_idx,
+                    current_instance_buffer_idx,
+                )
+                .unwrap();
+            current_vertex_buffer_idx += vert_count;
+            current_index_buffer_idx += index_count;
+            current_instance_buffer_idx += instance_count;
+        }
+        builder
             .end_render_pass(SubpassEndInfo { ..Default::default() })
             .unwrap();
         let clear_buffer = builder.build().unwrap();
@@ -801,10 +856,15 @@ impl Renderer {
     }
 }
 
+pub struct DepthImage {
+    pub view: Arc<ImageView>,
+    pub image: Arc<Image>,
+}
+
 pub struct FramebufferedImage {
-    framebuffer: Arc<Framebuffer>,
-    view: Arc<ImageView>,
-    image: Arc<Image>,
+    pub framebuffer: Arc<Framebuffer>,
+    pub view: Arc<ImageView>,
+    pub image: Arc<Image>,
 }
 
 pub struct RendererWindowSwapchain {
@@ -813,6 +873,7 @@ pub struct RendererWindowSwapchain {
      composite_alpha: CompositeAlpha,
      swapchain: Arc<Swapchain>,
      render_pass: Arc<RenderPass>,
+     depth_image: DepthImage,
      images: Vec<FramebufferedImage>,
 }
 
@@ -822,34 +883,36 @@ impl RendererWindowSwapchain {
         self.cached_dimensions == dimensions
     }
 
-    fn generate_swapchain(vulkan: &Arc<Instance>, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>) -> Result<Self, Validated<VulkanError>> {
+    fn generate_swapchain(vulkan: &Arc<Instance>, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>, mem_alloc: &Arc<StandardMemoryAllocator>) -> Result<Self, Validated<VulkanError>> {
         let surface = Surface::from_window(
             Arc::clone(&vulkan),
             Arc::clone(window)
         )?;
 
-        let (dimensions, composite_alpha, render_pass, swapchain, images) = Self::generate_swapchain_from_surface(&surface, window, pd, device)?;
+        let (dimensions, composite_alpha, render_pass, swapchain, depth_image, images) = Self::generate_swapchain_from_surface(&surface, window, pd, device, mem_alloc)?;
 
-        Ok(RendererWindowSwapchain { cached_dimensions: dimensions, surface, composite_alpha, swapchain, render_pass, images })
+        Ok(RendererWindowSwapchain { cached_dimensions: dimensions, surface, composite_alpha, swapchain, render_pass, depth_image, images })
     }
 
-    fn regenerated_swapchain(&mut self, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>) -> Result<(), Validated<VulkanError>> {
-        let (dimensions, composite_alpha, render_pass, swapchain, images) = Self::generate_swapchain_from_surface(&self.surface, window, pd, device)?;
+    fn regenerated_swapchain(&mut self, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>, mem_alloc: &Arc<StandardMemoryAllocator>) -> Result<(), Validated<VulkanError>> {
+        let (dimensions, composite_alpha, render_pass, swapchain, depth_image, images) = Self::generate_swapchain_from_surface(&self.surface, window, pd, device, mem_alloc)?;
 
         self.cached_dimensions = dimensions;
         self.composite_alpha = composite_alpha;
         self.swapchain = swapchain;
         self.render_pass = render_pass;
+        self.depth_image = depth_image;
         self.images = images;
 
         Ok(())
     }
 
-    fn generate_swapchain_from_surface(surface: &Arc<Surface>, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>) -> Result<(
+    fn generate_swapchain_from_surface(surface: &Arc<Surface>, window: &Arc<Window>, pd: &Arc<PhysicalDevice>, device: &Arc<Device>, mem_alloc: &Arc<StandardMemoryAllocator>) -> Result<(
         PhysicalSize<u32>,
         CompositeAlpha,
         Arc<RenderPass>,
         Arc<Swapchain>,
+        DepthImage,
         Vec<FramebufferedImage>,
     ), Validated<VulkanError>> {
         let capabilities = pd.surface_capabilities(&surface, Default::default())
@@ -860,23 +923,6 @@ impl RendererWindowSwapchain {
         let format = pd
             .surface_formats(&surface, Default::default())
             .expect("surface lookup done")[0].0;
-
-        let render_pass = vulkano::single_pass_renderpass!(
-            Arc::clone(device),
-            attachments: {
-                color: {
-                    format: format,
-                    samples: 1,
-                    load_op: Clear,
-                    store_op: Store,
-                },
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {},
-            },
-        ).tap_err(|e| log::error!("TOTALITY-RENDERER-RENDER-TO-FAILED source=render_pass {e}"))?;
-
 
         let (swapchain, raw_images) = Swapchain::new(
             Arc::clone(device),
@@ -891,12 +937,50 @@ impl RendererWindowSwapchain {
             },
         )?;
 
+        let depth_image = Image::new(
+            Arc::clone(mem_alloc) as _,
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::D16_UNORM,
+                extent: raw_images[0].extent(),
+                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSIENT_ATTACHMENT,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                ..Default::default()
+            },
+        ).unwrap();
+        let depth_attachment = ImageView::new_default(Arc::clone(&depth_image)).unwrap();
+
+        let render_pass = vulkano::single_pass_renderpass!(
+            Arc::clone(device),
+            attachments: {
+                color: {
+                    format: format,
+                    samples: 1,
+                    load_op: Clear,
+                    store_op: Store,
+                },
+                depth_stencil: {
+                    format: Format::D16_UNORM,
+                    samples: 1,
+                    load_op: Clear,
+                    store_op: DontCare,
+                },
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {depth_stencil},
+            },
+        ).tap_err(|e| log::error!("TOTALITY-RENDERER-RENDER-TO-FAILED source=render_pass {e}"))?;
+
+
         let images = raw_images.into_iter().map(|image| {
             let view = ImageView::new_default(Arc::clone(&image))?;
             let framebuffer = Framebuffer::new(
                 Arc::clone(&render_pass),
                 vulkano::render_pass::FramebufferCreateInfo {
-                    attachments: vec![Arc::clone(&view)],
+                    attachments: vec![Arc::clone(&view), Arc::clone(&depth_attachment)],
                     ..Default::default()
                 },
             )?;
@@ -907,7 +991,10 @@ impl RendererWindowSwapchain {
             })
         }).collect::<Result<Vec<_>, Validated<VulkanError>>>()?;
 
-        Ok((dimensions, composite_alpha, render_pass, swapchain, images))
+        Ok((dimensions, composite_alpha, render_pass, swapchain, DepthImage {
+            image: depth_image,
+            view: depth_attachment,
+        }, images))
     }
 }
 

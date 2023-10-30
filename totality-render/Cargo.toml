@@ -37,7 +37,7 @@ version = "0.29"
 default-features = false
 # features = ["rwh_05", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]
 features = ["rwh_05", "x11"]
-[dependenices.raw-window-handle]
+[dependencies.raw-window-handle]
 version = "0.5"
 [dependencies.vulkano]
 version = "0.34"

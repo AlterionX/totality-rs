@@ -28,8 +28,8 @@ layout (location = 2) out vec3 frag_vert_norm;
 void main() {
     mat4 model_offori = per_mesh_data[gl_InstanceIndex].offset_orientation;
 
-    // gl_Position = push.viewport_cam_offori * model_offori * vec4(position, 1.0);
-    gl_Position = vec4(position, 1.0);
+    gl_Position = push.viewport_cam_offori * model_offori * vec4(position, 1.0);
+    // gl_Position = vec4(position, 1.0);
     frag_uv = uv;
     frag_vert_norm = norm;
 }

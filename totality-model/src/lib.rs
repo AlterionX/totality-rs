@@ -102,12 +102,56 @@ pub fn unit_cube(texture: Option<String>) -> TriMeshGeom {
         geom::FMat::from_iterator(
             12,
             vec![
-                1, 4, 0, 5, 4, 1, // bottom
-                6, 3, 2, 7, 3, 6, // top
-                0, 2, 1, 3, 1, 2, // left
-                4, 7, 6, 5, 7, 4, // right
-                0, 6, 2, 6, 0, 4, // back
-                5, 3, 7, 3, 5, 1, // front
+                1, 0, 4, 5, 1, 4, // bottom
+                6, 2, 3, 6, 3, 7, // top
+                0, 1, 2, 3, 2, 1, // left
+                4, 6, 7, 4, 7, 5, // right
+                0, 2, 6, 0, 6, 4, // back
+                5, 7, 3, 3, 1, 5, // front
+            ]
+            .into_iter(),
+        ),
+        vec![[0.0, 0.0, 0.0]; 8],
+        vec![[0.0, 0.0, 0.0]; 12],
+        vec![
+            [0f32, 0f32],
+            [0f32, 1f32],
+            [0f32, 0f32],
+            [0f32, 1f32],
+            [0f32, 0f32],
+            [0f32, 1f32],
+            [0f32, 0f32],
+            [0f32, 1f32],
+        ],
+        texture,
+    )
+}
+
+pub fn coordinate_axis(texture: Option<String>) -> TriMeshGeom {
+    TriMeshGeom::new(
+        geom::VMat::from_iterator(
+            8,
+            [
+                -0.2, -0.5, -0.2, // left bottom rear
+                -0.2, -0.5,  0.2, // left bottom front
+                -0.2,  0.5, -0.2, // left top rear
+                -0.2,  0.5,  0.2, // left top front
+                 0.2, -0.5, -0.2, // right bottom rear
+                 0.2, -0.5,  0.2, // right bottom front
+                 0.2,  0.5, -0.2, // right top rear
+                 0.2,  0.5,  0.2, // right top front
+            ]
+            .into_iter(),
+        ),
+        geom::FMat::from_iterator(
+            12,
+            vec![
+                1, 0, 4, 5, 1, 4, // bottom
+                6, 2, 3, 6, 3, 7, // top
+                0, 1, 2, 3, 2, 1, // left
+                4, 6, 7, 4, 7, 5, // right
+                0, 2, 6, 0, 6, 4, // back
+                5, 7, 3, 3, 1, 5, // front
             ]
             .into_iter(),
         ),

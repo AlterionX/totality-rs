@@ -1,4 +1,4 @@
-use na::{Matrix4, UnitQuaternion, Vector3};
+use na::{Matrix4, UnitQuaternion, Vector3, Vector4};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Camera {
@@ -109,36 +109,28 @@ impl PerspectiveCamera {
     fn calc_p_mat(&mut self) {
         let n = self.near_plane_dist;
         let f = self.far_plane_dist;
-        let f_d = f / (n - f);
         let a = -self.aspect;
         let cot = 1. / (self.fov * 0.5).tan();
         self._p_cache = Matrix4::new(
-            cot,
-            0f32,
-            0f32,
-            0f32,
-            0f32,
-            a * cot,
-            0f32,
-            0f32,
-            0f32,
-            0f32,
-            f_d,
-            n * f_d,
-            0f32,
-            0f32,
-            -1f32,
-            0f32,
+            cot / a,    0f32,              0f32,                 0f32,
+               0f32,     cot,              0f32,                 0f32,
+               0f32,    0f32, (f + n) / (n - f), 2. * f * n / (n - f),
+               0f32,    0f32,             -1f32,                 0f32,
+        );
+        self._p_cache *= Matrix4::new(
+            -1f32, 0f32, 0f32, 0f32,
+            0f32, -1f32, 0f32, 0f32,
+            0f32, 0f32, 1f32, 0f32,
+            0f32, 0f32, 0f32, 1f32,
         );
     }
     fn calc_v_mat(&mut self) {
-        self._v_cache = self.orientation.to_homogeneous();
-        self._v_cache
-            .fixed_slice_mut::<3, 1>(0, 3)
-            .copy_from(&self.position);
-        if !self._v_cache.try_inverse_mut() {
-            panic!("Could not invert view matrix!");
-        }
+        self._v_cache = self.orientation.inverse().to_homogeneous() * Matrix4::new(
+            1f32, 0f32, 0f32, -self.position[0],
+            0f32, 1f32, 0f32, -self.position[1],
+            0f32, 0f32, 1f32, -self.position[2],
+            0f32, 0f32, 0f32, 1f32,
+        );
     }
     pub fn rot(&mut self, rotor: UnitQuaternion<f32>) {
         self.orientation = rotor * self.orientation;
@@ -171,6 +163,10 @@ impl Default for PerspectiveCamera {
             _p_cache: Matrix4::zeros(),
             _v_cache: Matrix4::zeros(),
         };
+        // The camera, by default, looks in the positive z direction, with positive y facing
+        // upwards. However, we usually pretend we're looking "into" a scene, so we'll move
+        // "forward" a little.
+        cam.trans(Vector3::new(0.0, 0.0, 5.0));
         cam.calc_p_mat();
         cam.calc_v_mat();
         cam

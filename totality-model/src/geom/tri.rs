@@ -50,8 +50,8 @@ impl TriMeshGeom {
     pub fn triangle(
         // Assumes this is in order
         vv: Matrix3<f32>,
-        vertex_norms: Vec<[f32; 3]>,
-        uvs: Vec<[f32; 2]>,
+        vertex_norms: [[f32; 3]; 3],
+        uvs: [[f32; 2]; 3],
         face_norm: [f32; 3],
         texture_file: Option<String>,
     ) -> Self {
