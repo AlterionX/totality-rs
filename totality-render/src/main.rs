@@ -74,7 +74,7 @@ impl<'a> RenderThread<'a> {
 
         let mut alloc = MeshAlloc::new();
         // Load up! This one's a simple triangle.
-        let triangle_mesh = TriMeshGeom::triangle(
+        let triangle_mesh = Box::leak(Box::new(TriMeshGeom::triangle(
             &mut alloc,
             Matrix3::new(
                 0.0, 0.5, 0.0,
@@ -85,14 +85,14 @@ impl<'a> RenderThread<'a> {
             [[0.5, 0.], [0., 0.5], [0., 0.]],
             [0., 0., 0.],
             None,
-        );
+        )));
         let cube_mesh = Box::leak(Box::new(model::unit_cube(&mut alloc, None)));
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
         let clear_color_mode = 0;
         let draw_tasks = vec![
             DrawTask {
-                mesh: Cow::Owned(triangle_mesh.clone()),
+                mesh: Cow::Borrowed(triangle_mesh),
                 instancing_information: vec![Cow::Owned({
                     let mut transform = AffineTransform::identity();
                     transform.pos = Vector3::new(1., 0., 0.);
@@ -100,7 +100,7 @@ impl<'a> RenderThread<'a> {
                 })],
             },
             DrawTask {
-                mesh: Cow::Owned(triangle_mesh.clone()),
+                mesh: Cow::Borrowed(triangle_mesh),
                 instancing_information: vec![Cow::Owned({
                     let mut transform = AffineTransform::identity();
                     transform.pos = Vector3::new(-1., 0., 0.);
