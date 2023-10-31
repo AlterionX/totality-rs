@@ -11,3 +11,10 @@ pub mod basic_frag {
         path: "resources/shaders/basic.frag",
     }
 }
+
+pub mod basic_geom {
+    vulkano_shaders::shader! {
+        ty: "geometry",
+        path: "resources/shaders/basic.geom",
+    }
+}

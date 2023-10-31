@@ -7,6 +7,7 @@ use model::geom::tri::TriMeshGeom;
 
 #[derive(Debug, Clone)]
 pub struct RenderTask<'a> {
+    pub draw_wireframe: bool,
     pub cam: &'a model::camera::Camera,
     pub draws: Vec<DrawTask<'a>>,
     pub clear_color: ClearColorValue,

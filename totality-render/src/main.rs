@@ -30,7 +30,8 @@ pub enum WorldEvent {
     Yaw(f32),
     Pitch(f32),
 
-    ShiftBackground,
+    ShiftBackground(bool),
+    ToggleWireFrame(bool),
 }
 
 pub struct StateMap {
@@ -42,6 +43,8 @@ pub struct StateMap {
     pub z_neg: bool,
     pub roll_left: bool,
     pub roll_right: bool,
+    pub wireframe: bool,
+    pub shift_background: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,6 +61,7 @@ pub struct RenderThread<'a> {
 
     clear_color_mode: usize,
     base_clear_color: [f32; 4],
+    is_wireframe: bool,
 
     camera: Camera,
     draw_tasks: Vec<DrawTask<'a>>,
@@ -89,7 +93,8 @@ impl<'a> RenderThread<'a> {
         let cube_mesh = Box::leak(Box::new(model::unit_cube(&mut alloc, None)));
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
-        let clear_color_mode = 0;
+        // 4 denotes "black", we'll just start there.
+        let clear_color_mode = 3;
         let draw_tasks = vec![
             DrawTask {
                 mesh: Cow::Borrowed(triangle_mesh),
@@ -163,6 +168,8 @@ impl<'a> RenderThread<'a> {
             x_neg: false,
             roll_right: false,
             roll_left: false,
+            shift_background: false,
+            wireframe: false,
         };
 
         Self {
@@ -172,6 +179,7 @@ impl<'a> RenderThread<'a> {
 
             clear_color_mode,
             base_clear_color,
+            is_wireframe: false,
 
             camera,
             draw_tasks,
@@ -227,8 +235,19 @@ impl<'a> FnOnce<()> for RenderThread<'a> {
                         WorldEvent::Pitch(delta) => {
                             pitch_delta += delta;
                         },
-                        WorldEvent::ShiftBackground => {
-                            self.clear_color_mode = (self.clear_color_mode + 1) % 3;
+                        WorldEvent::ToggleWireFrame(state) => {
+                            // Detect the upwards edge only.
+                            if state && !self.state_map.wireframe {
+                                self.is_wireframe = !self.is_wireframe;
+                            }
+                            self.state_map.wireframe = state;
+                        },
+                        WorldEvent::ShiftBackground(state) => {
+                            // Detect the upwards edge only.
+                            if state && !self.state_map.shift_background {
+                                self.clear_color_mode = (self.clear_color_mode + 1) % 4;
+                            }
+                            self.state_map.shift_background = state;
                         },
                     }
                 }
@@ -275,13 +294,19 @@ impl<'a> FnOnce<()> for RenderThread<'a> {
                 self.camera.rot_cam_space(total_orientation);
             }
 
-            let mut clear_color = self.base_clear_color.clone();
-            clear_color[self.clear_color_mode] = 1.;
+            let clear_color = if self.clear_color_mode == 3 {
+                [0., 0., 0., 1.]
+            } else {
+                let mut cc = self.base_clear_color.clone();
+                cc[self.clear_color_mode] = 1.;
+                cc
+            };
 
             self.renderer.render_to(Arc::clone(&self.window), RenderTask {
+                draw_wireframe: self.is_wireframe,
                 cam: &self.camera,
                 draws: self.draw_tasks.clone(),
-                clear_color: self.base_clear_color.clone().into(),
+                clear_color: clear_color.into(),
             }).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
@@ -343,6 +368,12 @@ fn main() {
                         },
                         KeyCode::ControlLeft => {
                             tx.send(WorldEvent::SetMoveDown(key_in.state.is_pressed())).unwrap();
+                        },
+                        KeyCode::KeyN => {
+                            tx.send(WorldEvent::ShiftBackground(key_in.state.is_pressed())).unwrap();
+                        },
+                        KeyCode::Tab => {
+                            tx.send(WorldEvent::ToggleWireFrame(key_in.state.is_pressed()));
                         },
                         _ => {},
                     },

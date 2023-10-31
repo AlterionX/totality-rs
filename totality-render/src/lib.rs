@@ -35,7 +35,7 @@ use vulkano::{
         DeviceCreateInfo,
         QueueCreateInfo,
         Queue,
-        DeviceExtensions,
+        DeviceExtensions, Features,
     },
     memory::allocator::{
         StandardMemoryAllocator,
@@ -240,6 +240,7 @@ pub struct Renderer {
     vulkan: Arc<Instance>,
 
     vertex_shader: Arc<ShaderModule>,
+    geometry_shader: Arc<ShaderModule>,
     fragment_shader: Arc<ShaderModule>,
 
     ordered_physical_devices: Vec<Arc<PhysicalDevice>>,
@@ -338,6 +339,10 @@ impl Renderer {
             let (device, queues_iter) = Device::new(
                 Arc::clone(&ordered_physical_devices[0]),
                 DeviceCreateInfo {
+                    enabled_features: Features {
+                        geometry_shader: true,
+                        ..Features::empty()
+                    },
                     queue_create_infos: vec![QueueCreateInfo {
                         queue_family_index: selected_queue_family_idx,
                         ..Default::default()
@@ -507,9 +512,12 @@ impl Renderer {
         let vertex_shader = shaders::basic_vert::load(Arc::clone(&selected_device))
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=shader shader=basic_vert {e}"))
             .map_err(|e| RendererInitializationError::ShaderLoadFail("basic_vert", e))?;
+        let geometry_shader = shaders::basic_geom::load(Arc::clone(&selected_device))
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=shader shader=basic_geom {e}"))
+            .map_err(|e| RendererInitializationError::ShaderLoadFail("basic_geom", e))?;
         let fragment_shader = shaders::basic_frag::load(Arc::clone(&selected_device))
-            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=shader shader=basic_vert {e}"))
-            .map_err(|e| RendererInitializationError::ShaderLoadFail("basic_vert", e))?;
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=shader shader=basic_frag {e}"))
+            .map_err(|e| RendererInitializationError::ShaderLoadFail("basic_frag", e))?;
 
         let descriptor_set_layout = DescriptorSetLayout::new(Arc::clone(&selected_device), DescriptorSetLayoutCreateInfo {
             flags: DescriptorSetLayoutCreateFlags::empty(),
@@ -531,7 +539,7 @@ impl Renderer {
             flags: PipelineLayoutCreateFlags::default(),
             set_layouts: vec![Arc::clone(&descriptor_set_layout)],
             push_constant_ranges: vec![PushConstantRange {
-                stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT | ShaderStages::GEOMETRY,
                 offset: 0,
                 size: 64 + 16,
             }],
@@ -585,6 +593,7 @@ impl Renderer {
             vulkan,
 
             vertex_shader,
+            geometry_shader,
             fragment_shader,
 
             ordered_physical_devices,
@@ -698,6 +707,7 @@ impl Renderer {
                 stages: [
                     PipelineShaderStageCreateInfo::new(self.vertex_shader.entry_point("main").unwrap()),
                     PipelineShaderStageCreateInfo::new(self.fragment_shader.entry_point("main").unwrap()),
+                    PipelineShaderStageCreateInfo::new(self.geometry_shader.entry_point("main").unwrap()),
                 ].into_iter().collect(),
                 rasterization_state: Some(RasterizationState {
                     cull_mode: CullMode::Back,
@@ -832,7 +842,7 @@ impl Renderer {
             .unwrap()
             .push_constants(Arc::clone(&self.pipeline_layout), 0, task.cam.get_vp_mat())
             .unwrap()
-            .push_constants(Arc::clone(&self.pipeline_layout), 64, [0.0f32, 0.0f32, 0.0f32, 0.0f32])
+            .push_constants(Arc::clone(&self.pipeline_layout), 64, [if task.draw_wireframe { 1u32 } else { 0u32 }, 0u32, 0u32, 0u32])
             .unwrap()
             .bind_descriptor_sets(PipelineBindPoint::Graphics, Arc::clone(&self.pipeline_layout), 0, Arc::clone(&self.descriptor_set))
             .unwrap()
