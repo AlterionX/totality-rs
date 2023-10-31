@@ -254,6 +254,7 @@ pub struct Renderer {
     face_buffer: Subbuffer<[u8]>,
     uniform_per_mesh_buffer: Subbuffer<[u8]>,
     uniform_light_buffer: Subbuffer<[u8]>,
+    uniform_material_buffer: Subbuffer<[u8]>,
     constants_buffer: Subbuffer<[u8]>,
     texture_buffer: Subbuffer<[u8]>,
 
@@ -463,6 +464,30 @@ impl Renderer {
         )
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=matrix_buffer error=failed_creation {e}"))
             .map_err(RendererInitializationError::BufferCreationFailed)?;
+        // More for materials!
+        let uniform_material_buffer = Buffer::new_unsized(
+            Arc::clone(&dyn_device_memory_alloc),
+            BufferCreateInfo {
+                usage: BufferUsage::UNIFORM_BUFFER | BufferUsage::TRANSFER_DST,
+                // flags: (),
+                // sharing: (),
+                // usage: (),
+                // external_memory_handle_types: (),
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                // memory_type_bits: (),
+                // allocate_preference: (),
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            // This allows for approximately 500 instances.
+            // Assuming a 4x4 32bit float matrix for orientation, positioning, and scaling -- 16 *
+            // 32 / 8 = 2^6 bytes per array. 2^6 * 500 = 32000. Let's just use ~50KB.
+            16 * 1024,
+        )
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=matrix_buffer error=failed_creation {e}"))
+            .map_err(RendererInitializationError::BufferCreationFailed)?;
         // And another for textures.
         let texture_buffer = Buffer::new_unsized(
             Arc::clone(&dyn_device_memory_alloc),
@@ -532,6 +557,11 @@ impl Renderer {
                     stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
                 }),
+                (2, DescriptorSetLayoutBinding {
+                    descriptor_count: 1024,
+                    stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
+                }),
             ].into_iter().collect(),
             ..DescriptorSetLayoutCreateInfo::default()
         }).unwrap();
@@ -549,7 +579,7 @@ impl Renderer {
         let descriptor_pool = DescriptorPool::new(Arc::clone(&selected_device), DescriptorPoolCreateInfo {
             max_sets: 20,
             pool_sizes: [
-                (DescriptorType::UniformBuffer, 2),
+                (DescriptorType::UniformBuffer, 3),
             ].into_iter().collect(),
             flags: DescriptorPoolCreateFlags::empty(),
             ..Default::default()
@@ -585,6 +615,15 @@ impl Renderer {
                         uniform_light_buffer.clone().slice(start..end)
                     })
                 ),
+                WriteDescriptorSet::buffer_array(
+                    2,
+                    0,
+                    (0..1024).map(|idx| {
+                        let start = idx * 16;
+                        let end = start + 16;
+                        uniform_material_buffer.clone().slice(start..end)
+                    })
+                ),
             ],
             [],
         ).unwrap();
@@ -607,6 +646,7 @@ impl Renderer {
             face_buffer,
             uniform_per_mesh_buffer,
             uniform_light_buffer,
+            uniform_material_buffer,
             texture_buffer,
             constants_buffer,
 
@@ -641,6 +681,10 @@ impl Renderer {
         mapped_buffer[..num_bytes_to_copy].copy_from_slice(cast_slice);
 
         Ok(())
+    }
+
+    pub fn invalidate_model_memory(&mut self) {
+        self.loaded_models.clear();
     }
 
     pub fn render_to<'a>(&mut self, window: Arc<Window>, task: RenderTask<'a>) -> Result<(), Validated<VulkanError>> {

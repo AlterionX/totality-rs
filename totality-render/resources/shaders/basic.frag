@@ -12,6 +12,9 @@ layout (binding = 1, std140) uniform Lights {
     layout (offset =  0) mat4 orientation;
     layout (offset = 64) vec3 offset;
 } lights[1024];
+layout (binding = 2, std140) uniform Materials {
+    layout (offset =  0) vec4 material;
+} materials[1024];
 
 layout (push_constant) uniform Constants {
   layout (offset =  0) mat4 viewport_cam_offori;

@@ -10,11 +10,14 @@ layout (binding = 0, std140) uniform PerMeshData {
 layout (binding = 1, std140) uniform PointLights {
     layout (offset =  0) vec4 position;
 } lights[1024];
+layout (binding = 2, std140) uniform Materials {
+    layout (offset =  0) vec4 material;
+} materials[1024];
 
 layout (push_constant) uniform Constants {
   layout (offset =  0) mat4 viewport_cam_offori;
   // This is technically not used, but included since our compiler is dumb and requires this to be fully specified.
-  layout (offset = 64) vec4 color;
+  layout (offset = 64) bool draw_wireframe;
 } push;
 
 layout (location = 0) out gl_PerVertex {
