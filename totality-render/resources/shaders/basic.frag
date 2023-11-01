@@ -5,25 +5,26 @@ layout (location = 2) in vec3 vert_norm;
 layout (location = 3) in vec2 normalized_bc;
 layout (location = 4) in vec3 height_adjusted_bc;
 
-layout (binding = 0, std140) uniform PerMeshData {
+layout (set = 0, binding = 0, std140) uniform PerMeshData {
     layout (offset =  0) mat4 orientation;
     layout (offset = 64) vec3 offset;
 } per_mesh_data[1024];
-layout (binding = 1, std140) uniform Lights {
+layout (set = 0, binding = 1, std140) uniform Lights {
     layout (offset =  0) mat4 orientation;
     layout (offset = 64) vec3 offset;
 } lights[1024];
-layout (binding = 2, std140) uniform Materials {
+layout (set = 0, binding = 2, std140) uniform Materials {
     layout (offset =  0) vec4 material;
 } materials[1024];
+
+layout(set = 1, binding = 0) uniform texture2D tex;
+layout(set = 1, binding = 1) uniform sampler samp;
 
 layout (push_constant) uniform Constants {
   layout (offset =  0) mat4 viewport_cam_offori;
   // This is technically not used, but included since our compiler is dumb and requires this to be fully specified.
   layout (offset = 64) bool draw_wireframe;
 } push;
-// layout(set = 0, binding = 0) uniform texture2D tex;
-// layout(set = 0, binding = 1) uniform sampler samp;
 
 layout (location = 0) out vec4 color;
 
@@ -38,9 +39,10 @@ void main() {
         }
     }
 
+    vec4 base_color = vec4(uv, 0.0, 1.0);
     // if (push.has_tex) {
-    //     color = mix(color, texture(sampler2D(tex, samp), uv), 0.5);
+    //     base_color = texture(sampler2D(tex, samp), uv);
     // }
 
-    color = vec4(uv, 0.0, 1.0);
+    color = base_color;
 }

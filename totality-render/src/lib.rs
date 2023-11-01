@@ -3,6 +3,7 @@ mod shaders;
 
 use std::{sync::Arc, collections::{HashMap, hash_map::Entry}};
 
+use img::ImageDecoder;
 use tap::{TapFallible, TapOptional};
 use task::RenderTask;
 use thiserror::Error;
@@ -62,15 +63,15 @@ use vulkano::{
         SubpassContents,
         SubpassEndInfo,
         ClearAttachment,
-        ClearRect,
+        ClearRect, CopyBufferToImageInfo, sys::{UnsafeCommandBuffer, UnsafeCommandBufferBuilder, CommandBufferBeginInfo}, CommandBufferLevel,
     },
     image::{
         ImageUsage,
         Image,
-        view::ImageView,
+        view::{ImageView, ImageViewCreateInfo},
         SampleCount,
         ImageCreateInfo,
-        ImageType,
+        ImageType, ImageCreateFlags, ImageLayout, ImageTiling, ImageSubresourceRange, sampler::{Sampler, SamplerCreateInfo},
     },
     format::{
         Format,
@@ -87,7 +88,7 @@ use vulkano::{
     },
     sync::{
         HostAccessError,
-        GpuFuture,
+        GpuFuture, ImageMemoryBarrier, DependencyInfo, DependencyFlags,
     },
     pipeline::{
         GraphicsPipeline,
@@ -129,7 +130,7 @@ use vulkano::{
             PipelineLayoutCreateFlags,
             PushConstantRange,
         },
-        PipelineShaderStageCreateInfo, PipelineBindPoint,
+        PipelineShaderStageCreateInfo, PipelineBindPoint, Pipeline,
     },
     descriptor_set::{
         pool::{
@@ -146,10 +147,10 @@ use vulkano::{
         },
         allocator::{
             StandardDescriptorSetAllocator,
-            StandardDescriptorSetAllocatorCreateInfo,
+            StandardDescriptorSetAllocatorCreateInfo, DescriptorSetAllocator, StandardDescriptorSetAlloc,
         },
         PersistentDescriptorSet,
-        WriteDescriptorSet,
+        WriteDescriptorSet, DescriptorSet, DescriptorSetWithOffsets,
     },
 };
 use winit::{window::{WindowId, Window}, dpi::PhysicalSize};
@@ -212,6 +213,13 @@ impl RendererPreferences {
     }
 }
 
+pub struct LoadedModelHandles {
+    texture_image: Option<Arc<Image>>,
+    texture_descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+    vertex_offset: i32,
+    index_offset: u32,
+}
+
 #[derive(Debug, Error)]
 pub enum RendererInitializationError {
     #[error("{0}")]
@@ -256,22 +264,24 @@ pub struct Renderer {
     uniform_light_buffer: Subbuffer<[u8]>,
     uniform_material_buffer: Subbuffer<[u8]>,
     constants_buffer: Subbuffer<[u8]>,
-    texture_buffer: Subbuffer<[u8]>,
+    staging_texture_buffer: Subbuffer<[u8]>,
 
     command_buffer_alloc: Arc<StandardCommandBufferAllocator>,
 
     pipeline_layout: Arc<PipelineLayout>,
 
     descriptor_set_layout: Arc<DescriptorSetLayout>,
+    texture_descriptor_set_layout: Arc<DescriptorSetLayout>,
     descriptor_pool: DescriptorPool,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     descriptor_set: Arc<PersistentDescriptorSet>,
+    empty_texture_descriptor_set: Arc<PersistentDescriptorSet>,
 
     // TODO: better map for window ids?
     windowed_swapchain: HashMap<WindowId, RendererWindowSwapchain>,
 
     // Mesh id to (vertex, index) buffer offsets.
-    loaded_models: HashMap<u64, (i32, u32)>,
+    loaded_models: HashMap<u64, LoadedModelHandles>,
     vertex_free_byte_start: u64,
     index_free_byte_start: u64,
     vertex_free_start: i32,
@@ -489,7 +499,7 @@ impl Renderer {
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=matrix_buffer error=failed_creation {e}"))
             .map_err(RendererInitializationError::BufferCreationFailed)?;
         // And another for textures.
-        let texture_buffer = Buffer::new_unsized(
+        let staging_texture_buffer = Buffer::new_unsized(
             Arc::clone(&dyn_device_memory_alloc),
             BufferCreateInfo {
                 usage: BufferUsage::UNIFORM_TEXEL_BUFFER | BufferUsage::TRANSFER_DST,
@@ -508,7 +518,7 @@ impl Renderer {
             },
             50 * 1024 * 1024
         )
-            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=texture_buffer error=failed_creation {e}"))
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=staging_texture_buffer error=failed_creation {e}"))
             .map_err(RendererInitializationError::BufferCreationFailed)?;
         // And a last chunk for constants.
         let constants_buffer = Buffer::new_unsized(
@@ -565,9 +575,28 @@ impl Renderer {
             ].into_iter().collect(),
             ..DescriptorSetLayoutCreateInfo::default()
         }).unwrap();
+        let texture_descriptor_set_layout = DescriptorSetLayout::new(Arc::clone(&selected_device), DescriptorSetLayoutCreateInfo {
+            flags: DescriptorSetLayoutCreateFlags::empty(),
+            bindings: [
+                (0, DescriptorSetLayoutBinding {
+                    descriptor_count: 1,
+                    stages: ShaderStages::FRAGMENT,
+                    ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::SampledImage)
+                }),
+                (1, DescriptorSetLayoutBinding {
+                    descriptor_count: 1,
+                    stages: ShaderStages::FRAGMENT,
+                    ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::Sampler)
+                }),
+            ].into_iter().collect(),
+            ..DescriptorSetLayoutCreateInfo::default()
+        }).unwrap();
         let pipeline_layout = PipelineLayout::new(Arc::clone(&selected_device), PipelineLayoutCreateInfo {
             flags: PipelineLayoutCreateFlags::default(),
-            set_layouts: vec![Arc::clone(&descriptor_set_layout)],
+            set_layouts: vec![
+                Arc::clone(&descriptor_set_layout),
+                Arc::clone(&texture_descriptor_set_layout),
+            ],
             push_constant_ranges: vec![PushConstantRange {
                 stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT | ShaderStages::GEOMETRY,
                 offset: 0,
@@ -577,9 +606,11 @@ impl Renderer {
         }).unwrap();
 
         let descriptor_pool = DescriptorPool::new(Arc::clone(&selected_device), DescriptorPoolCreateInfo {
-            max_sets: 20,
+            max_sets: 11, // 1 universal descriptor set, 10 textures allowed.
             pool_sizes: [
                 (DescriptorType::UniformBuffer, 3),
+                (DescriptorType::SampledImage, 10),
+                (DescriptorType::Sampler, 10),
             ].into_iter().collect(),
             flags: DescriptorPoolCreateFlags::empty(),
             ..Default::default()
@@ -587,7 +618,7 @@ impl Renderer {
         let descriptor_set_allocator = StandardDescriptorSetAllocator::new(
             Arc::clone(&selected_device),
             StandardDescriptorSetAllocatorCreateInfo {
-                set_count: descriptor_set_layout.bindings().len(),
+                set_count: descriptor_set_layout.bindings().len() + texture_descriptor_set_layout.bindings().len() * 10,
                 update_after_bind: false,
                 ..Default::default()
             }
@@ -595,7 +626,7 @@ impl Renderer {
 
         let descriptor_set = PersistentDescriptorSet::new(
             &descriptor_set_allocator,
-            Arc::clone(&pipeline_layout.set_layouts().get(0).unwrap()),
+            Arc::clone(&descriptor_set_layout),
             [
                 WriteDescriptorSet::buffer_array(
                     0,
@@ -627,6 +658,29 @@ impl Renderer {
             ],
             [],
         ).unwrap();
+        let empty_texture_image = Image::new(
+            Arc::clone(&device_memory_alloc) as _,
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R8G8B8A8_UINT,
+                extent: [1, 1, 1],
+                usage: ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                ..Default::default()
+            },
+        ).unwrap();
+        let empty_texture_image_view = ImageView::new_default(empty_texture_image).unwrap();
+        let empty_texture_descriptor_set = PersistentDescriptorSet::new(
+            &descriptor_set_allocator,
+            Arc::clone(&texture_descriptor_set_layout),
+            [
+                WriteDescriptorSet::image_view(0, empty_texture_image_view),
+                WriteDescriptorSet::sampler(1, Sampler::new(Arc::clone(&selected_device), SamplerCreateInfo::simple_repeat_linear_no_mipmap()).unwrap()),
+            ],
+            [],
+        ).unwrap();
 
         Ok(Self {
             vulkan,
@@ -647,7 +701,7 @@ impl Renderer {
             uniform_per_mesh_buffer,
             uniform_light_buffer,
             uniform_material_buffer,
-            texture_buffer,
+            staging_texture_buffer,
             constants_buffer,
 
             command_buffer_alloc,
@@ -655,9 +709,11 @@ impl Renderer {
             pipeline_layout,
 
             descriptor_set_layout,
+            texture_descriptor_set_layout,
             descriptor_pool,
             descriptor_set_allocator,
             descriptor_set,
+            empty_texture_descriptor_set,
 
             // 1 since that's the typical usecase. 0 would be unused.
             windowed_swapchain: HashMap::with_capacity(1),
@@ -714,7 +770,95 @@ impl Renderer {
 
                 Self::copy_sized_slice_to_buffer(&self.vertex_buffer.clone().slice(self.vertex_free_byte_start..), draw.mesh.vec_vv.as_slice()).unwrap();
                 Self::copy_sized_slice_to_buffer(&self.face_buffer.clone().slice(self.index_free_byte_start..), draw.mesh.ff.as_slice()).unwrap();
-                self.loaded_models.insert(draw.mesh.mesh_id, (self.vertex_free_start, self.index_free_start));
+                // We'll assume the image's format is RGB.
+                let (texture_image, texture_descriptor_set) = if let Some(ref file_path) = draw.mesh.tex_file {
+                    log::info!("RENDER-TEXTURE mesh={mesh_id} texture={file_path:?}");
+                    assert!(file_path.ends_with(".png"), "only pngs are handled, and only ARGB pngs");
+                    let f = std::fs::File::open(file_path).expect("provided file exists");
+                    let texture_file = img::codecs::png::PngDecoder::new(std::io::BufReader::new(f)).expect("file is a png");
+                    let (texture_width, texture_height) = texture_file.dimensions();
+                    let mut texture_cpu_buffer = vec![0u32; (texture_file.total_bytes() / 4) as usize];
+                    texture_file.read_image(bytemuck::cast_slice_mut(texture_cpu_buffer.as_mut_slice())).unwrap();
+                    Self::copy_sized_slice_to_buffer(&self.staging_texture_buffer.clone(), texture_cpu_buffer.as_slice()).unwrap();
+                    let texture_image = Image::new(
+                        Arc::clone(&self.device_memory_alloc) as _,
+                        ImageCreateInfo {
+                            format: Format::R8G8B8A8_UINT,
+                            view_formats: vec![Format::R8G8B8A8_UINT],
+                            extent: [texture_width, texture_height, 1],
+                            usage: ImageUsage::INPUT_ATTACHMENT | ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                            tiling: ImageTiling::Linear,
+                            initial_layout: ImageLayout::TransferDstOptimal,
+                            ..Default::default()
+                        },
+                        AllocationCreateInfo {
+                            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                            ..Default::default()
+                        },
+                    ).unwrap();
+                    let texture_image_view = ImageView::new_default(Arc::clone(&texture_image)).unwrap();
+
+                    // TODO Batch these somehow.
+                    unsafe {
+                        UnsafeCommandBufferBuilder::new(
+                            &self.command_buffer_alloc,
+                            self.selected_device_queues[0].queue_family_index(),
+                            CommandBufferLevel::Primary,
+                            CommandBufferBeginInfo {
+                                usage: CommandBufferUsage::OneTimeSubmit,
+                                inheritance_info: None,
+                                ..Default::default()
+                            },
+                        ).unwrap()
+                        .copy_buffer_to_image(&CopyBufferToImageInfo {
+                            ..CopyBufferToImageInfo::buffer_image(self.staging_texture_buffer.clone(), Arc::clone(&texture_image))
+                        })
+                        .unwrap()
+                        .pipeline_barrier(&DependencyInfo {
+                            image_memory_barriers: [ImageMemoryBarrier {
+                                new_layout: ImageLayout::ShaderReadOnlyOptimal,
+                                subresource_range: ImageSubresourceRange {
+                                    ..ImageSubresourceRange::from_parameters(texture_image.format(), 0, 0)
+                                },
+                                ..ImageMemoryBarrier::image(Arc::clone(&texture_image))
+                            }].into_iter().collect(),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    }
+
+                    let texture_descriptor_set = PersistentDescriptorSet::new_variable(
+                        &self.descriptor_set_allocator,
+                        Arc::clone(&self.texture_descriptor_set_layout),
+                        1,
+                        [
+                            WriteDescriptorSet::image_view(0, texture_image_view),
+                            WriteDescriptorSet::sampler(
+                                1,
+                                Sampler::new(
+                                    Arc::clone(&self.selected_device),
+                                    SamplerCreateInfo {
+                                        ..SamplerCreateInfo::simple_repeat_linear_no_mipmap()
+                                    },
+                                ).unwrap(),
+                            ),
+                        ],
+                        [],
+                    ).unwrap();
+
+                    (Some(texture_image), Some(texture_descriptor_set))
+                } else {
+                    (None, None)
+                };
+
+                self.loaded_models.insert(draw.mesh.mesh_id,
+                    LoadedModelHandles {
+                        texture_image,
+                        texture_descriptor_set,
+                        vertex_offset: self.vertex_free_start,
+                        index_offset: self.index_free_start,
+                    }
+                );
 
                 self.vertex_free_start += draw.mesh.vec_vv.len() as i32;
                 self.index_free_start += draw.mesh.ff.len() as u32;
@@ -837,6 +981,7 @@ impl Renderer {
                 ..GraphicsPipelineCreateInfo::layout(Arc::clone(&self.pipeline_layout))
             }
         ).unwrap();
+        log::info!("RENDER-PASS-PIPELINE descriptor_set={}", pipeline.num_used_descriptor_sets());
 
         let base_queue = &self.selected_device_queues[0];
         let mut builder = AutoCommandBufferBuilder::primary(
@@ -888,28 +1033,50 @@ impl Renderer {
             .unwrap()
             .push_constants(Arc::clone(&self.pipeline_layout), 64, [if task.draw_wireframe { 1u32 } else { 0u32 }, 0u32, 0u32, 0u32])
             .unwrap()
-            .bind_descriptor_sets(PipelineBindPoint::Graphics, Arc::clone(&self.pipeline_layout), 0, Arc::clone(&self.descriptor_set))
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                Arc::clone(&self.pipeline_layout),
+                0,
+                (Arc::clone(&self.descriptor_set), Arc::clone(&self.empty_texture_descriptor_set))
+            )
             .unwrap()
             .bind_index_buffer(IndexBuffer::U32(self.face_buffer.clone().reinterpret()))
             .unwrap();
         let mut current_instance_buffer_idx = 0;
         for draw in task.draws.iter() {
-            let (current_vertex_buffer_idx, current_index_buffer_idx) = self.loaded_models[&draw.mesh.mesh_id];
+            let handle = &self.loaded_models[&draw.mesh.mesh_id];
             let vert_count = draw.mesh.vec_vv.len() as i32;
             let index_count = draw.mesh.ff.len() as u32;
             let instance_count = draw.instancing_information.len() as u32;
-            log::info!("RENDER-PASS-DRAW vertex_start={current_vertex_buffer_idx} vertex_count={vert_count} index_start={current_index_buffer_idx} index_count={index_count} instance_start={current_instance_buffer_idx} instance_count={instance_count}");
-
+            log::info!(
+                "RENDER-PASS-DRAW vertex_start={} vertex_count={vert_count} index_start={} index_count={index_count} instance_start={current_instance_buffer_idx} instance_count={instance_count}",
+                handle.vertex_offset,
+                handle.index_offset,
+            );
+            // let texture_descriptor_set = if let Some(ref descriptor_set) = handle.texture_descriptor_set {
+            //     descriptor_set
+            // } else {
+            //     &self.empty_texture_descriptor_set
+            // };
+            // builder
+            //     .bind_descriptor_sets(
+            //         PipelineBindPoint::Graphics,
+            //         Arc::clone(&self.pipeline_layout),
+            //         1,
+            //         Arc::clone(&texture_descriptor_set),
+            //     )
+            //     .unwrap();
             builder
                 .draw_indexed(
                     index_count,
                     instance_count,
-                    current_index_buffer_idx,
-                    current_vertex_buffer_idx,
+                    handle.index_offset,
+                    handle.vertex_offset,
                     current_instance_buffer_idx,
                 )
                 .unwrap();
             current_instance_buffer_idx += instance_count;
+            log::info!("RENDER-PASS-DRAW-COMPLETE");
         }
         builder
             .end_render_pass(SubpassEndInfo { ..Default::default() })

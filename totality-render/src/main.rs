@@ -374,7 +374,7 @@ fn main() {
                             tx.send(WorldEvent::ShiftBackground(key_in.state.is_pressed())).unwrap();
                         },
                         KeyCode::Tab => {
-                            tx.send(WorldEvent::ToggleWireFrame(key_in.state.is_pressed()));
+                            tx.send(WorldEvent::ToggleWireFrame(key_in.state.is_pressed())).unwrap();
                         },
                         _ => {},
                     },

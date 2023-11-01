@@ -18,7 +18,7 @@ version = "0.32"
 
 [dependencies.img]
 package = "image"
-version = "0.21.1"
+version = "0.24"
 
 [dependencies]
 log = "0.4"
