@@ -2,7 +2,8 @@
 
 layout (location = 1) in vec2 uv;
 layout (location = 2) in vec3 vert_norm;
-layout (location = 3) in vec2 bc;
+layout (location = 3) in vec2 normalized_bc;
+layout (location = 4) in vec3 height_adjusted_bc;
 
 layout (binding = 0, std140) uniform PerMeshData {
     layout (offset =  0) mat4 orientation;
@@ -29,8 +30,9 @@ layout (location = 0) out vec4 color;
 void main() {
     // Wireframe drawing.
     if (push.draw_wireframe) {
-        // If a barymetric coordinate is "small", we're close to the edge.
-        if (min(min(bc.x, bc.y), 1 - bc.x - bc.y) < 0.01) {
+        // If a barymetric coordinate is "small", we're close to the edge. Otherwise, proceed to normal shading.
+        float distance_to_closest_edge = min(min(height_adjusted_bc.x, height_adjusted_bc.y), height_adjusted_bc.z);
+        if (distance_to_closest_edge < 0.01) {
             color = vec4(0, 1, 0, 1);
             return;
         }

@@ -109,6 +109,7 @@ impl<'a> RenderThread<'a> {
                 instancing_information: vec![Cow::Owned({
                     let mut transform = AffineTransform::identity();
                     transform.pos = Vector3::new(-1., 0., 0.);
+                    transform.scaling.x = 1000.;
                     transform
                 })],
             },
