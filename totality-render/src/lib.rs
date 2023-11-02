@@ -1,9 +1,10 @@
 pub mod task;
 mod shaders;
 
-use std::{sync::Arc, collections::{HashMap, hash_map::Entry}};
+use std::{sync::Arc, collections::{HashMap, hash_map::Entry}, time::{Instant, Duration}};
 
-use img::ImageDecoder;
+use img::{ImageDecoder, codecs::png::{PngDecoder, PngReader}, ImageFormat};
+use raw_window_handle::HandleError;
 use tap::{TapFallible, TapOptional};
 use task::RenderTask;
 use thiserror::Error;
@@ -54,7 +55,7 @@ use vulkano::{
     command_buffer::{
         allocator::{
             StandardCommandBufferAllocator,
-            StandardCommandBufferAllocatorCreateInfo,
+            StandardCommandBufferAllocatorCreateInfo, CommandBufferAlloc,
         },
         AutoCommandBufferBuilder,
         CommandBufferUsage,
@@ -63,7 +64,7 @@ use vulkano::{
         SubpassContents,
         SubpassEndInfo,
         ClearAttachment,
-        ClearRect, CopyBufferToImageInfo, sys::{UnsafeCommandBuffer, UnsafeCommandBufferBuilder, CommandBufferBeginInfo}, CommandBufferLevel,
+        ClearRect, CopyBufferToImageInfo, sys::{UnsafeCommandBuffer, UnsafeCommandBufferBuilder, CommandBufferBeginInfo}, CommandBufferLevel, CommandBufferInheritanceInfo, SecondaryCommandBufferAbstract,
     },
     image::{
         ImageUsage,
@@ -242,6 +243,8 @@ pub enum RendererInitializationError {
     CommandBufferCreationFailed(Validated<VulkanError>),
     #[error("failed to compile shader {0}: {1}")]
     ShaderLoadFail(&'static str, Validated<VulkanError>),
+    #[error("surface extension enumeration: {0}")]
+    SurfaceCheck(#[from] HandleError),
 }
 
 pub struct Renderer {
@@ -276,6 +279,7 @@ pub struct Renderer {
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     descriptor_set: Arc<PersistentDescriptorSet>,
     empty_texture_descriptor_set: Arc<PersistentDescriptorSet>,
+    texture_sampler: Arc<Sampler>,
 
     // TODO: better map for window ids?
     windowed_swapchain: HashMap<WindowId, RendererWindowSwapchain>,
@@ -289,10 +293,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn init(application_name: Option<String>, application_version: Option<Version>, windowing: &Window, pref: &RendererPreferences) -> Result<Self, RendererInitializationError> {
+    pub fn init(application_name: Option<String>, application_version: Option<Version>, windowing: Arc<Window>, pref: &RendererPreferences) -> Result<Self, RendererInitializationError> {
         let vulkan_library = VulkanLibrary::new()
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED primary_source=vulkan_lib error=missing_error {e}"))?;
-        let required_extensions = Surface::required_extensions(windowing);
+        let required_extensions = Surface::required_extensions(&windowing)
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED primary_source=surface_check {e}"))?;
         let vulkan = Instance::new(
             vulkan_library,
             InstanceCreateInfo {
@@ -502,7 +507,7 @@ impl Renderer {
         let staging_texture_buffer = Buffer::new_unsized(
             Arc::clone(&dyn_device_memory_alloc),
             BufferCreateInfo {
-                usage: BufferUsage::UNIFORM_TEXEL_BUFFER | BufferUsage::TRANSFER_DST,
+                usage: BufferUsage::UNIFORM_TEXEL_BUFFER | BufferUsage::TRANSFER_DST | BufferUsage::TRANSFER_SRC,
                 // flags: (),
                 // sharing: (),
                 // size: (),
@@ -662,7 +667,7 @@ impl Renderer {
             Arc::clone(&device_memory_alloc) as _,
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                format: Format::R8G8B8A8_UINT,
+                format: Format::R32G32B32_SFLOAT,
                 extent: [1, 1, 1],
                 usage: ImageUsage::SAMPLED,
                 ..Default::default()
@@ -680,6 +685,12 @@ impl Renderer {
                 WriteDescriptorSet::sampler(1, Sampler::new(Arc::clone(&selected_device), SamplerCreateInfo::simple_repeat_linear_no_mipmap()).unwrap()),
             ],
             [],
+        ).unwrap();
+        let texture_sampler = Sampler::new(
+            Arc::clone(&selected_device),
+            SamplerCreateInfo {
+                ..SamplerCreateInfo::simple_repeat_linear_no_mipmap()
+            },
         ).unwrap();
 
         Ok(Self {
@@ -714,6 +725,7 @@ impl Renderer {
             descriptor_set_allocator,
             descriptor_set,
             empty_texture_descriptor_set,
+            texture_sampler,
 
             // 1 since that's the typical usecase. 0 would be unused.
             windowed_swapchain: HashMap::with_capacity(1),
@@ -732,7 +744,6 @@ impl Renderer {
         };
 
         let cast_slice = bytemuck::cast_slice(to_copy);
-        log::info!("RENDER-COPY-DATA {cast_slice:?}");
         let num_bytes_to_copy = cast_slice.len();
         mapped_buffer[..num_bytes_to_copy].copy_from_slice(cast_slice);
 
@@ -744,6 +755,72 @@ impl Renderer {
     }
 
     pub fn render_to<'a>(&mut self, window: Arc<Window>, task: RenderTask<'a>) -> Result<(), Validated<VulkanError>> {
+        struct RenderTimer {
+            start: Instant,
+            inflight_load: Option<Instant>,
+            loads: Vec<Duration>,
+            inflight_command_record: Option<Instant>,
+            command_record_duration: Option<Duration>,
+            inflight_draw: Option<Instant>,
+            draw_duration: Option<Duration>,
+        }
+
+        impl RenderTimer {
+            fn begin() -> Self {
+                Self {
+                    start: Instant::now(),
+                    inflight_load: None,
+                    loads: Vec::with_capacity(20),
+                    inflight_command_record: None,
+                    command_record_duration: None,
+                    inflight_draw: None,
+                    draw_duration: None,
+                }
+            }
+
+            fn record_load_start(&mut self) {
+                self.inflight_load = Some(Instant::now());
+            }
+
+            fn record_load_end(&mut self) {
+                let Some(start) = self.inflight_load else {
+                    return;
+                };
+                self.loads.push(Instant::now() - start);
+            }
+
+            fn record_command_record_start(&mut self) {
+                self.inflight_command_record = Some(Instant::now());
+            }
+
+            fn record_command_record_end(&mut self) {
+                let Some(start) = self.inflight_command_record else {
+                    return;
+                };
+                self.command_record_duration = Some(Instant::now() - start);
+            }
+
+            fn record_draw_start(&mut self) {
+                self.inflight_draw = Some(Instant::now());
+            }
+
+            fn record_draw_end(&mut self) {
+                let Some(start) = self.inflight_draw else {
+                    return;
+                };
+                self.draw_duration = Some(Instant::now() - start);
+            }
+
+            fn record_end(self) {
+                let over = Instant::now() - self.start;
+                let a = 1000. / over.as_millis() as f64;
+                log::info!("RENDER-PASS-TIMING fps={a} loads={:?} submit={:?} draw={:?} total={:?}", self.loads, self.command_record_duration, self.draw_duration, over);
+            }
+        }
+
+        let mut perf = RenderTimer::begin();
+
+
         let mut e = self.windowed_swapchain.entry(window.id());
         let window_swapchain = match e {
             Entry::Vacant(v) => {
@@ -768,6 +845,8 @@ impl Renderer {
                     continue;
                 }
 
+                perf.record_load_start();
+
                 Self::copy_sized_slice_to_buffer(&self.vertex_buffer.clone().slice(self.vertex_free_byte_start..), draw.mesh.vec_vv.as_slice()).unwrap();
                 Self::copy_sized_slice_to_buffer(&self.face_buffer.clone().slice(self.index_free_byte_start..), draw.mesh.ff.as_slice()).unwrap();
                 // We'll assume the image's format is RGB.
@@ -775,20 +854,18 @@ impl Renderer {
                     log::info!("RENDER-TEXTURE mesh={mesh_id} texture={file_path:?}");
                     assert!(file_path.ends_with(".png"), "only pngs are handled, and only ARGB pngs");
                     let f = std::fs::File::open(file_path).expect("provided file exists");
-                    let texture_file = img::codecs::png::PngDecoder::new(std::io::BufReader::new(f)).expect("file is a png");
-                    let (texture_width, texture_height) = texture_file.dimensions();
-                    let mut texture_cpu_buffer = vec![0u32; (texture_file.total_bytes() / 4) as usize];
-                    texture_file.read_image(bytemuck::cast_slice_mut(texture_cpu_buffer.as_mut_slice())).unwrap();
-                    Self::copy_sized_slice_to_buffer(&self.staging_texture_buffer.clone(), texture_cpu_buffer.as_slice()).unwrap();
+                    let texture_file = img::load(std::io::BufReader::new(f), ImageFormat::Png).unwrap().into_rgb32f();
+                    let (texture_width, texture_height) = (texture_file.width(), texture_file.height());
+                    Self::copy_sized_slice_to_buffer(&self.staging_texture_buffer.clone(), texture_file.into_raw().as_slice()).unwrap();
                     let texture_image = Image::new(
                         Arc::clone(&self.device_memory_alloc) as _,
                         ImageCreateInfo {
-                            format: Format::R8G8B8A8_UINT,
-                            view_formats: vec![Format::R8G8B8A8_UINT],
+                            format: Format::R32G32B32_SFLOAT,
+                            view_formats: vec![Format::R32G32B32_SFLOAT],
                             extent: [texture_width, texture_height, 1],
                             usage: ImageUsage::INPUT_ATTACHMENT | ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
-                            tiling: ImageTiling::Linear,
-                            initial_layout: ImageLayout::TransferDstOptimal,
+                            tiling: ImageTiling::Optimal,
+                            initial_layout: ImageLayout::Undefined,
                             ..Default::default()
                         },
                         AllocationCreateInfo {
@@ -799,48 +876,27 @@ impl Renderer {
                     let texture_image_view = ImageView::new_default(Arc::clone(&texture_image)).unwrap();
 
                     // TODO Batch these somehow.
-                    unsafe {
-                        UnsafeCommandBufferBuilder::new(
-                            &self.command_buffer_alloc,
-                            self.selected_device_queues[0].queue_family_index(),
-                            CommandBufferLevel::Primary,
-                            CommandBufferBeginInfo {
-                                usage: CommandBufferUsage::OneTimeSubmit,
-                                inheritance_info: None,
-                                ..Default::default()
-                            },
-                        ).unwrap()
-                        .copy_buffer_to_image(&CopyBufferToImageInfo {
+                    let mut image_copy_builder = AutoCommandBufferBuilder::primary(&self.command_buffer_alloc, self.selected_device_queues[0].queue_family_index(), CommandBufferUsage::OneTimeSubmit).unwrap();
+                    image_copy_builder
+                        .copy_buffer_to_image(CopyBufferToImageInfo {
                             ..CopyBufferToImageInfo::buffer_image(self.staging_texture_buffer.clone(), Arc::clone(&texture_image))
                         })
-                        .unwrap()
-                        .pipeline_barrier(&DependencyInfo {
-                            image_memory_barriers: [ImageMemoryBarrier {
-                                new_layout: ImageLayout::ShaderReadOnlyOptimal,
-                                subresource_range: ImageSubresourceRange {
-                                    ..ImageSubresourceRange::from_parameters(texture_image.format(), 0, 0)
-                                },
-                                ..ImageMemoryBarrier::image(Arc::clone(&texture_image))
-                            }].into_iter().collect(),
-                            ..Default::default()
-                        })
                         .unwrap();
-                    }
+                    let image_copy_buffer = image_copy_builder.build().unwrap();
+                    vulkano::sync::now(Arc::clone(&self.selected_device))
+                        .then_execute(Arc::clone(&self.selected_device_queues[0]), image_copy_buffer)
+                        .unwrap()
+                        .flush()
+                        .unwrap();
 
-                    let texture_descriptor_set = PersistentDescriptorSet::new_variable(
+                    let texture_descriptor_set = PersistentDescriptorSet::new(
                         &self.descriptor_set_allocator,
                         Arc::clone(&self.texture_descriptor_set_layout),
-                        1,
                         [
                             WriteDescriptorSet::image_view(0, texture_image_view),
                             WriteDescriptorSet::sampler(
                                 1,
-                                Sampler::new(
-                                    Arc::clone(&self.selected_device),
-                                    SamplerCreateInfo {
-                                        ..SamplerCreateInfo::simple_repeat_linear_no_mipmap()
-                                    },
-                                ).unwrap(),
+                                Arc::clone(&self.texture_sampler),
                             ),
                         ],
                         [],
@@ -868,6 +924,8 @@ impl Renderer {
                 self.index_free_byte_start += fblen;
 
                 log::info!("RENDER-COPY mesh={mesh_id} vertex_start={} vertex_len={vblen} face_start={} face_len={fblen}", self.vertex_free_byte_start, self.index_free_byte_start);
+
+                perf.record_load_end();
             }
             Self::copy_sized_slice_to_buffer(&self.uniform_per_mesh_buffer, task.instancing_information_bytes().as_slice()).unwrap();
         }
@@ -983,6 +1041,8 @@ impl Renderer {
         ).unwrap();
         log::info!("RENDER-PASS-PIPELINE descriptor_set={}", pipeline.num_used_descriptor_sets());
 
+        perf.record_command_record_start();
+
         let base_queue = &self.selected_device_queues[0];
         let mut builder = AutoCommandBufferBuilder::primary(
             &self.command_buffer_alloc,
@@ -1053,19 +1113,19 @@ impl Renderer {
                 handle.vertex_offset,
                 handle.index_offset,
             );
-            // let texture_descriptor_set = if let Some(ref descriptor_set) = handle.texture_descriptor_set {
-            //     descriptor_set
-            // } else {
-            //     &self.empty_texture_descriptor_set
-            // };
-            // builder
-            //     .bind_descriptor_sets(
-            //         PipelineBindPoint::Graphics,
-            //         Arc::clone(&self.pipeline_layout),
-            //         1,
-            //         Arc::clone(&texture_descriptor_set),
-            //     )
-            //     .unwrap();
+            let texture_descriptor_set = if let Some(ref descriptor_set) = handle.texture_descriptor_set {
+                descriptor_set
+            } else {
+                &self.empty_texture_descriptor_set
+            };
+            builder
+                .bind_descriptor_sets(
+                    PipelineBindPoint::Graphics,
+                    Arc::clone(&self.pipeline_layout),
+                    1,
+                    Arc::clone(&texture_descriptor_set),
+                )
+                .unwrap();
             builder
                 .draw_indexed(
                     index_count,
@@ -1082,6 +1142,11 @@ impl Renderer {
             .end_render_pass(SubpassEndInfo { ..Default::default() })
             .unwrap();
         let clear_buffer = builder.build().unwrap();
+
+        perf.record_command_record_end();
+
+        perf.record_draw_start();
+
         vulkano::sync::now(Arc::clone(&self.selected_device))
             .join(framebuffer_future)
             .then_execute(Arc::clone(&base_queue), clear_buffer)
@@ -1090,6 +1155,9 @@ impl Renderer {
             .flush()
             .unwrap();
 
+        perf.record_draw_end();
+
+        perf.record_end();
         log::info!("RENDER-PASS-COMPLETE");
 
         Ok(())
@@ -1127,7 +1195,7 @@ impl RendererWindowSwapchain {
         let surface = Surface::from_window(
             Arc::clone(&vulkan),
             Arc::clone(window)
-        )?;
+        ).unwrap();
 
         let (dimensions, composite_alpha, render_pass, swapchain, depth_image, images) = Self::generate_swapchain_from_surface(&surface, window, pd, device, mem_alloc)?;
 

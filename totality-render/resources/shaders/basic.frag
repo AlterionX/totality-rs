@@ -40,9 +40,10 @@ void main() {
     }
 
     vec4 base_color = vec4(uv, 0.0, 1.0);
-    // if (push.has_tex) {
-    //     base_color = texture(sampler2D(tex, samp), uv);
-    // }
+    ivec2 texSize = textureSize(sampler2D(tex, samp), 0);
+    if (texSize.x != 1 && texSize.y != 1) {
+        base_color = texture(sampler2D(tex, samp), uv);
+    }
 
     color = base_color;
 }

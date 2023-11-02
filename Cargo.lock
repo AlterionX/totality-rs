@@ -1283,7 +1283,6 @@ dependencies = [
  "log",
  "ndk-sys",
  "num_enum",
- "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.0",
  "thiserror",
 ]
@@ -1713,12 +1712,6 @@ checksum = "b800beb9b6e7d2df1fe337c9e3d04e3af22a124460fb4c30fcc22c9117cefb41"
 dependencies = [
  "cty",
 ]
-
-[[package]]
-name = "raw-window-handle"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ff9a1f06a88b01621b7ae906ef0211290d1c8a168a15542486a8f61c0833b9"
 
 [[package]]
 name = "raw-window-handle"
@@ -2328,7 +2321,7 @@ dependencies = [
  "image",
  "log",
  "nalgebra 0.32.3",
- "raw-window-handle 0.5.2",
+ "raw-window-handle 0.6.0",
  "simple_logger 2.3.0",
  "tap",
  "thiserror",
@@ -2452,8 +2445,7 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 [[package]]
 name = "vulkano"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a790cf632b45c8c153cb7ab0510d332366dd6b13d1008af84cf659a3f8ffdf5"
+source = "git+https://github.com/vulkano-rs/vulkano.git#6a8a75d6be836d79f7a01b490eb20d6ad068d3d8"
 dependencies = [
  "ahash",
  "ash",
@@ -2469,7 +2461,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "proc-macro2 1.0.69",
  "quote 1.0.33",
- "raw-window-handle 0.5.2",
+ "raw-window-handle 0.6.0",
  "regex",
  "serde",
  "serde_json",
@@ -2482,20 +2474,18 @@ dependencies = [
 [[package]]
 name = "vulkano-macros"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52be622d364272fd77e298e7f68e8547ae66e7687cb86eb85335412cee7e3965"
+source = "git+https://github.com/vulkano-rs/vulkano.git#6a8a75d6be836d79f7a01b490eb20d6ad068d3d8"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2 1.0.69",
  "quote 1.0.33",
- "syn 1.0.109",
+ "syn 2.0.38",
 ]
 
 [[package]]
 name = "vulkano-shaders"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1f63401297565d74afb96e9add12587d8e46235140cee325a8eb6ba4602f4ee"
+source = "git+https://github.com/vulkano-rs/vulkano.git#6a8a75d6be836d79f7a01b490eb20d6ad068d3d8"
 dependencies = [
  "ahash",
  "heck",
@@ -2905,7 +2895,7 @@ dependencies = [
  "once_cell",
  "orbclient",
  "percent-encoding",
- "raw-window-handle 0.5.2",
+ "raw-window-handle 0.6.0",
  "redox_syscall 0.3.5",
  "rustix",
  "smol_str",

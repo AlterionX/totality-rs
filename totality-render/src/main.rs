@@ -72,7 +72,7 @@ pub struct RenderThread<'a> {
 impl<'a> RenderThread<'a> {
     fn new(input_rx: Receiver<WorldEvent>, window: &Arc<Window>) -> Self {
         let preferences = RendererPreferences::default();
-        let renderer = Renderer::init(Some("totality-render-demo".to_owned()), None, &*window, &preferences).unwrap();
+        let renderer = Renderer::init(Some("totality-render-demo".to_owned()), None, Arc::clone(window), &preferences).unwrap();
 
         let camera = Camera::Perspective(PerspectiveCamera::default());
 
@@ -91,6 +91,7 @@ impl<'a> RenderThread<'a> {
             None,
         )));
         let cube_mesh = Box::leak(Box::new(model::unit_cube(&mut alloc, None)));
+        let textured_cube_mesh = Box::leak(Box::new(model::unit_cube(&mut alloc, Some("../resources/logo.png".to_owned()))));
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
         // 4 denotes "black", we'll just start there.
@@ -157,6 +158,14 @@ impl<'a> RenderThread<'a> {
                         transform
                     }),
                 ],
+            },
+            DrawTask {
+                mesh: Cow::Borrowed(textured_cube_mesh),
+                instancing_information: vec![Cow::Owned({
+                    let mut transform = AffineTransform::identity();
+                    transform.pos += Vector3::new(1., 2., 1.);
+                    transform
+                })],
             },
         ];
 
