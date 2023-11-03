@@ -126,3 +126,37 @@ pub fn unit_cube(alloc: &mut MeshAlloc, texture: Option<String>) -> TriMeshGeom 
         texture,
     )
 }
+
+/// Generates a "flat" mesh, centered on the origin, aligned with the x/z plane.
+pub fn plane(alloc: &mut MeshAlloc, texture: Option<String>) -> TriMeshGeom {
+    TriMeshGeom::new(
+        alloc,
+        geom::VMat::from_iterator(
+            4,
+            [
+                 0.5, 0.,  0.5,
+                 0.5, 0., -0.5,
+                -0.5, 0., -0.5,
+                -0.5, 0.,  0.5,
+            ]
+            .into_iter(),
+        ),
+        geom::FMat::from_iterator(
+            2,
+            vec![
+                0, 1, 2,
+                0, 2, 3,
+            ]
+            .into_iter(),
+        ),
+        vec![[0.0, 0.0, 0.0]; 4],
+        vec![[0.0, 0.0, 0.0]; 2],
+        vec![
+            [1., 1.],
+            [0., 1.],
+            [0., 0.],
+            [1., 0.],
+        ],
+        texture,
+    )
+}

@@ -1,9 +1,9 @@
 #![feature(unboxed_closures, fn_traits)]
 
-use std::{sync::{Arc, mpsc::{self, Receiver}}, borrow::Cow};
+use std::{sync::{Arc, mpsc::{self, Receiver}, Mutex}, borrow::Cow, time::Instant};
 
 use model::{geom::{tri::TriMeshGeom, MeshAlloc}, AffineTransform, camera::{Camera, PerspectiveCamera}};
-use na::{Matrix3, Vector3, UnitQuaternion};
+use na::{Matrix3, Vector3, UnitQuaternion, UnitVector3, Vector4};
 use winit::{
     event_loop::{EventLoop, ControlFlow},
     window::{WindowBuilder, CursorGrabMode, Window},
@@ -11,7 +11,7 @@ use winit::{
     keyboard::{PhysicalKey, KeyCode},
 };
 
-use totality_render::{Renderer, RendererPreferences, task::{RenderTask, DrawTask}};
+use totality_render::{Renderer, RendererPreferences, task::{RenderTask, DrawTask, LightCollection, Light, PointLight, DirectionalLight}};
 
 pub enum WindowPurpose {
     Primary,
@@ -54,27 +54,206 @@ enum MouseMotionMode {
 }
 const FORCE_MOUSE_MOTION_MODE: Option<MouseMotionMode> = Some(MouseMotionMode::Warp);
 
-pub struct RenderThread<'a> {
-    window: Arc<Window>,
+#[derive(Debug, Clone)]
+pub struct SimState {
+    pub camera: Camera,
+    pub is_wireframe: bool,
+    pub clear_color_mode: usize,
+    pub light_direction: UnitVector3<f32>,
+}
+
+impl Default for SimState {
+    fn default() -> Self {
+        Self {
+            camera: Camera::Perspective(PerspectiveCamera::default()),
+            is_wireframe: false,
+            // 3 is the black state -- we'll start there.
+            clear_color_mode: 3,
+            light_direction: UnitVector3::new_normalize(Vector3::new(1., 1., 1.)),
+        }
+    }
+}
+
+pub struct SimThread {
     input_rx: Receiver<WorldEvent>,
     state_map: StateMap,
 
-    clear_color_mode: usize,
-    base_clear_color: [f32; 4],
-    is_wireframe: bool,
+    // TODO tribuffer here
+    sim_state: Arc<Mutex<SimState>>,
 
-    camera: Camera,
+    previous_iteration: Option<Instant>,
+}
+
+impl SimThread {
+    fn new(input_rx: Receiver<WorldEvent>, sim_state: Arc<Mutex<SimState>>) -> Self {
+        let state_map = StateMap {
+            z_pos: false,
+            z_neg: false,
+            y_pos: false,
+            y_neg: false,
+            x_pos: false,
+            x_neg: false,
+            roll_right: false,
+            roll_left: false,
+            shift_background: false,
+            wireframe: false,
+        };
+
+        Self {
+            input_rx,
+            state_map,
+
+            sim_state,
+
+            previous_iteration: None,
+        }
+    }
+}
+
+impl FnOnce<()> for SimThread {
+    type Output = ();
+
+    extern "rust-call" fn call_once(mut self, _args: ()) -> Self::Output {
+        let mut prior_log = Instant::now();
+        'prime: loop {
+            let iteration_start = Instant::now();
+            let Some(prior_iteration) = self.previous_iteration else {
+                self.previous_iteration = Some(iteration_start);
+                continue;
+            };
+            let stashed_elapsed_time = iteration_start - prior_iteration;
+            let elapsed = (stashed_elapsed_time.as_nanos() as f32) / 1000000.;
+            self.previous_iteration = Some(iteration_start);
+
+            let mut pitch_delta = 0.;
+            let mut yaw_delta = 0.;
+            while let Some(e) = match self.input_rx.try_recv() {
+                Ok(e) => Some(e),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    break 'prime;
+                },
+            } {
+                match e {
+                    WorldEvent::SetMoveForward(state) => {
+                        self.state_map.z_neg = state;
+                    },
+                    WorldEvent::SetMoveBackward(state) => {
+                        self.state_map.z_pos = state;
+                    },
+                    WorldEvent::SetMoveLeft(state) => {
+                        self.state_map.x_neg = state;
+                    },
+                    WorldEvent::SetMoveRight(state) => {
+                        self.state_map.x_pos = state;
+                    },
+                    WorldEvent::SetMoveUp(state) => {
+                        self.state_map.y_pos = state;
+                    },
+                    WorldEvent::SetMoveDown(state) => {
+                        self.state_map.y_neg = state;
+                    },
+                    WorldEvent::SetRollLeft(state) => {
+                        self.state_map.roll_left = state;
+                    },
+                    WorldEvent::SetRollRight(state) => {
+                        self.state_map.roll_right = state;
+                    },
+                    WorldEvent::Yaw(delta) => {
+                        yaw_delta += delta;
+                    },
+                    WorldEvent::Pitch(delta) => {
+                        pitch_delta += delta;
+                    },
+                    WorldEvent::ToggleWireFrame(state) => {
+                        // Detect the upwards edge only.
+                        if state && !self.state_map.wireframe {
+                            let mut sim = self.sim_state.lock().unwrap();
+                            sim.is_wireframe = !sim.is_wireframe;
+                        }
+                        self.state_map.wireframe = state;
+                    },
+                    WorldEvent::ShiftBackground(state) => {
+                        // Detect the upwards edge only.
+                        if state && !self.state_map.shift_background {
+                            let mut sim = self.sim_state.lock().unwrap();
+                            sim.clear_color_mode = (sim.clear_color_mode + 1) % 4;
+                        }
+                        self.state_map.shift_background = state;
+                    },
+                }
+            }
+            let timed_displacement = {
+                let mut displacement = Vector3::<f32>::zeros();
+                if self.state_map.z_pos {
+                    displacement.z += 0.005;
+                }
+                if self.state_map.z_neg {
+                    displacement.z -= 0.005;
+                }
+                if self.state_map.x_pos {
+                    displacement.x += 0.005;
+                }
+                if self.state_map.x_neg {
+                    displacement.x -= 0.005;
+                }
+                if self.state_map.y_pos {
+                    displacement.y += 0.005;
+                }
+                if self.state_map.y_neg {
+                    displacement.y -= 0.005;
+                }
+                displacement
+            };
+            let mut timed_roll = 0.;
+            // Ideally we'd use a velocity of sorts instead of hard coding, but this is an
+            // example.
+            if self.state_map.roll_right {
+                timed_roll += std::f32::consts::PI / 5000.;
+            }
+            if self.state_map.roll_left {
+                timed_roll -= std::f32::consts::PI / 5000.;
+            }
+
+            // Print every once in a while to cut down logs.
+            if (Instant::now() - prior_log).as_secs() > 1 {
+                log::info!("CAMERA-SHIFT displacement={:?} rot_roll={timed_roll} rot_pitch={pitch_delta} rot_yaw={yaw_delta}", timed_displacement.as_slice());
+                prior_log = Instant::now();
+            }
+
+            // For the unit quaternion:
+            //   roll is about the x axis (and thus functions as pitch in our world space)
+            //   pitch is about the y axis (and thus functions as yaw in our world space)
+            //   yaw is about the z axis (and thus functions as roll in our world space)
+            let total_rotation = UnitQuaternion::from_euler_angles(pitch_delta, yaw_delta, timed_roll * elapsed);
+            let total_displacement = timed_displacement * elapsed;
+
+            let mut sim = self.sim_state.lock().unwrap();
+            sim.camera.trans_cam_space(total_displacement);
+            sim.camera.rot_cam_space(total_rotation);
+
+            let ori = UnitQuaternion::new(Vector3::x() * std::f32::consts::PI / 1000. * elapsed).to_homogeneous();
+            let original_direction = Vector4::new(sim.light_direction.x, sim.light_direction.y, sim.light_direction.z, 1.);
+            sim.light_direction = UnitVector3::new_normalize((ori * original_direction).xyz());
+        }
+    }
+}
+
+pub struct RenderThread<'a> {
+    window: Arc<Window>,
+
+    base_clear_color: [f32; 4],
+
+    sim_state: Arc<Mutex<SimState>>,
     draw_tasks: Vec<DrawTask<'a>>,
 
     renderer: Renderer,
 }
 
 impl<'a> RenderThread<'a> {
-    fn new(input_rx: Receiver<WorldEvent>, window: &Arc<Window>) -> Self {
+    fn new(sim_state: Arc<Mutex<SimState>>, window: &Arc<Window>) -> Self {
         let preferences = RendererPreferences::default();
         let renderer = Renderer::init(Some("totality-render-demo".to_owned()), None, Arc::clone(window), &preferences).unwrap();
-
-        let camera = Camera::Perspective(PerspectiveCamera::default());
 
         let mut alloc = MeshAlloc::new();
         // Load up! This one's a simple triangle.
@@ -95,7 +274,6 @@ impl<'a> RenderThread<'a> {
         let base_clear_color = [0.5, 0.5, 0.5, 1.];
 
         // 4 denotes "black", we'll just start there.
-        let clear_color_mode = 3;
         let draw_tasks = vec![
             DrawTask {
                 mesh: Cow::Borrowed(triangle_mesh),
@@ -167,31 +345,22 @@ impl<'a> RenderThread<'a> {
                     transform
                 })],
             },
+            DrawTask {
+                mesh: Cow::Owned(model::plane(&mut alloc, None)),
+                instancing_information: vec![Cow::Owned({
+                    let mut transform = AffineTransform::identity();
+                    transform.pos += Vector3::new(0., -3., 0.);
+                    transform
+                })],
+            },
         ];
-
-        let state_map = StateMap {
-            z_pos: false,
-            z_neg: false,
-            y_pos: false,
-            y_neg: false,
-            x_pos: false,
-            x_neg: false,
-            roll_right: false,
-            roll_left: false,
-            shift_background: false,
-            wireframe: false,
-        };
 
         Self {
             window: Arc::clone(window),
-            input_rx,
-            state_map,
 
-            clear_color_mode,
             base_clear_color,
-            is_wireframe: false,
 
-            camera,
+            sim_state,
             draw_tasks,
 
             renderer,
@@ -203,120 +372,26 @@ impl<'a> FnOnce<()> for RenderThread<'a> {
     type Output = ();
 
     extern "rust-call" fn call_once(mut self, _args: ()) -> Self::Output {
-        'prime: loop {
-            { // input handling
-                let mut pitch_delta = 0.;
-                let mut yaw_delta = 0.;
-                while let Some(e) = match self.input_rx.try_recv() {
-                    Ok(e) => Some(e),
-                    Err(mpsc::TryRecvError::Empty) => None,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        break 'prime;
-                    },
-                } {
-                    match e {
-                        WorldEvent::SetMoveForward(state) => {
-                            self.state_map.z_neg = state;
-                        },
-                        WorldEvent::SetMoveBackward(state) => {
-                            self.state_map.z_pos = state;
-                        },
-                        WorldEvent::SetMoveLeft(state) => {
-                            self.state_map.x_neg = state;
-                        },
-                        WorldEvent::SetMoveRight(state) => {
-                            self.state_map.x_pos = state;
-                        },
-                        WorldEvent::SetMoveUp(state) => {
-                            self.state_map.y_pos = state;
-                        },
-                        WorldEvent::SetMoveDown(state) => {
-                            self.state_map.y_neg = state;
-                        },
-                        WorldEvent::SetRollLeft(state) => {
-                            self.state_map.roll_left = state;
-                        },
-                        WorldEvent::SetRollRight(state) => {
-                            self.state_map.roll_right = state;
-                        },
-                        WorldEvent::Yaw(delta) => {
-                            yaw_delta += delta;
-                        },
-                        WorldEvent::Pitch(delta) => {
-                            pitch_delta += delta;
-                        },
-                        WorldEvent::ToggleWireFrame(state) => {
-                            // Detect the upwards edge only.
-                            if state && !self.state_map.wireframe {
-                                self.is_wireframe = !self.is_wireframe;
-                            }
-                            self.state_map.wireframe = state;
-                        },
-                        WorldEvent::ShiftBackground(state) => {
-                            // Detect the upwards edge only.
-                            if state && !self.state_map.shift_background {
-                                self.clear_color_mode = (self.clear_color_mode + 1) % 4;
-                            }
-                            self.state_map.shift_background = state;
-                        },
-                    }
-                }
-                let total_displacement = {
-                    let mut displacement = Vector3::<f32>::zeros();
-                    if self.state_map.z_pos {
-                        displacement.z += 0.1;
-                    }
-                    if self.state_map.z_neg {
-                        displacement.z -= 0.1;
-                    }
-                    if self.state_map.x_pos {
-                        displacement.x += 0.1;
-                    }
-                    if self.state_map.x_neg {
-                        displacement.x -= 0.1;
-                    }
-                    if self.state_map.y_pos {
-                        displacement.y += 0.1;
-                    }
-                    if self.state_map.y_neg {
-                        displacement.y -= 0.1;
-                    }
-                    displacement
-                };
-                let mut roll = 0.;
-                let total_orientation = {
-                    // Ideally we'd use a velocity of sorts instead of hard coding, but this is an
-                    // example.
-                    if self.state_map.roll_right {
-                        roll += std::f32::consts::PI / 50.;
-                    }
-                    if self.state_map.roll_left {
-                        roll -= std::f32::consts::PI / 50.;
-                    }
-                    // For the unit quaternion:
-                    //   roll is about the x axis (and thus functions as pitch in our world space)
-                    //   pitch is about the y axis (and thus functions as yaw in our world space)
-                    //   yaw is about the z axis (and thus functions as roll in our world space)
-                    UnitQuaternion::from_euler_angles(pitch_delta, yaw_delta, roll)
-                };
-                log::info!("CAMERA-SHIFT displacement={:?} rot_roll={roll} rot_pitch={pitch_delta} rot_yaw={yaw_delta}", total_displacement.as_slice());
-                self.camera.trans_cam_space(total_displacement);
-                self.camera.rot_cam_space(total_orientation);
-            }
-
-            let clear_color = if self.clear_color_mode == 3 {
+        loop {
+            let sim = self.sim_state.lock().unwrap().clone();
+            let clear_color = if sim.clear_color_mode == 3 {
                 [0., 0., 0., 1.]
             } else {
                 let mut cc = self.base_clear_color.clone();
-                cc[self.clear_color_mode] = 1.;
+                cc[sim.clear_color_mode] = 1.;
                 cc
             };
 
+            log::info!("CAMERA {:?}", sim.camera);
             self.renderer.render_to(Arc::clone(&self.window), RenderTask {
-                draw_wireframe: self.is_wireframe,
-                cam: &self.camera,
+                draw_wireframe: sim.is_wireframe,
+                cam: &sim.camera.clone(),
                 draws: self.draw_tasks.clone(),
                 clear_color: clear_color.into(),
+                lights: LightCollection(vec![Light::Directional(DirectionalLight {
+                    color: Vector3::new(1., 1., 1.),
+                    direction: sim.light_direction,
+                })]),
             }).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
@@ -333,8 +408,10 @@ fn main() {
 
     // Setup communication mesh.
     let (tx, rx) = mpsc::channel::<WorldEvent>();
+    let sim_state = Arc::new(Mutex::new(SimState::default()));
 
-    std::thread::spawn(RenderThread::new(rx, &window));
+    std::thread::spawn(SimThread::new(rx, Arc::clone(&sim_state)));
+    std::thread::spawn(RenderThread::new(Arc::clone(&sim_state), &window));
 
     // We could *try* to seed this, but I'm lazy.
     let mut warp_mouse_detected = false;

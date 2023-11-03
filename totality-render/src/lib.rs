@@ -263,6 +263,7 @@ pub struct Renderer {
 
     vertex_buffer: Subbuffer<[u8]>,
     face_buffer: Subbuffer<[u8]>,
+    uniform_counts_buffer: Subbuffer<[u8]>,
     uniform_per_mesh_buffer: Subbuffer<[u8]>,
     uniform_light_buffer: Subbuffer<[u8]>,
     uniform_material_buffer: Subbuffer<[u8]>,
@@ -433,6 +434,29 @@ impl Renderer {
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=face_buffer error=failed_creation {e}"))
             .map_err(RendererInitializationError::BufferCreationFailed)?;
         // One for instanced model sets.
+        let uniform_counts_buffer = Buffer::new_unsized(
+            Arc::clone(&dyn_device_memory_alloc),
+            BufferCreateInfo {
+                usage: BufferUsage::UNIFORM_BUFFER | BufferUsage::TRANSFER_DST,
+                // flags: (),
+                // sharing: (),
+                // usage: (),
+                // external_memory_handle_types: (),
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                // memory_type_bits: (),
+                // allocate_preference: (),
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            // This allows for approximately 1024 instances.
+            // Assuming a 4x4 32bit ...
+            16,
+        )
+            .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=count_buffer error=failed_creation {e}"))
+            .map_err(RendererInitializationError::BufferCreationFailed)?;
+        // One for instanced model sets.
         let uniform_per_mesh_buffer = Buffer::new_unsized(
             Arc::clone(&dyn_device_memory_alloc),
             BufferCreateInfo {
@@ -475,7 +499,7 @@ impl Renderer {
             // This allows for approximately 500 instances.
             // Assuming a 4x4 32bit float matrix for orientation, positioning, and scaling -- 16 *
             // 32 / 8 = 2^6 bytes per array. 2^6 * 500 = 32000. Let's just use ~50KB.
-            16 * 1024,
+            96 * 1024,
         )
             .tap_err(|e| log::error!("TOTALITY-RENDERER-INIT-FAILED source=matrix_buffer error=failed_creation {e}"))
             .map_err(RendererInitializationError::BufferCreationFailed)?;
@@ -563,7 +587,7 @@ impl Renderer {
             flags: DescriptorSetLayoutCreateFlags::empty(),
             bindings: [
                 (0, DescriptorSetLayoutBinding {
-                    descriptor_count: 1024,
+                    descriptor_count: 1,
                     stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
                 }),
@@ -573,6 +597,11 @@ impl Renderer {
                     ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
                 }),
                 (2, DescriptorSetLayoutBinding {
+                    descriptor_count: 1024,
+                    stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
+                }),
+                (3, DescriptorSetLayoutBinding {
                     descriptor_count: 1024,
                     stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer)
@@ -633,8 +662,12 @@ impl Renderer {
             &descriptor_set_allocator,
             Arc::clone(&descriptor_set_layout),
             [
-                WriteDescriptorSet::buffer_array(
+                WriteDescriptorSet::buffer(
                     0,
+                    uniform_counts_buffer.clone().slice(0..16)
+                ),
+                WriteDescriptorSet::buffer_array(
+                    1,
                     0,
                     (0..1024).map(|idx| {
                         let start = idx * 64;
@@ -643,16 +676,16 @@ impl Renderer {
                     })
                 ),
                 WriteDescriptorSet::buffer_array(
-                    1,
+                    2,
                     0,
                     (0..1024).map(|idx| {
-                        let start = idx * 16;
-                        let end = start + 16;
+                        let start = idx * 32;
+                        let end = start + 32;
                         uniform_light_buffer.clone().slice(start..end)
                     })
                 ),
                 WriteDescriptorSet::buffer_array(
-                    2,
+                    3,
                     0,
                     (0..1024).map(|idx| {
                         let start = idx * 16;
@@ -709,6 +742,7 @@ impl Renderer {
 
             vertex_buffer,
             face_buffer,
+            uniform_counts_buffer,
             uniform_per_mesh_buffer,
             uniform_light_buffer,
             uniform_material_buffer,
@@ -927,7 +961,12 @@ impl Renderer {
 
                 perf.record_load_end();
             }
+
+            perf.record_load_start();
             Self::copy_sized_slice_to_buffer(&self.uniform_per_mesh_buffer, task.instancing_information_bytes().as_slice()).unwrap();
+            Self::copy_sized_slice_to_buffer(&self.uniform_light_buffer, task.lights.to_bytes().as_slice()).unwrap();
+            Self::copy_sized_slice_to_buffer(&self.uniform_counts_buffer, &[0u32, task.lights.0.len() as u32, 0u32, 0u32]).unwrap();
+            perf.record_load_end();
         }
 
         let (active_framebuffer, afidx, framebuffer_future) = {
